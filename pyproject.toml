@@ -1,0 +1,24 @@
+[project]
+name = "research-library"
+version = "0.1.0"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.14"
+dependencies = [
+    "celery[redis]>=5.6.3,<5.7",
+    "celery-types>=0.26.0",
+    "fastapi>=0.141.1",
+    "openai>=3.19.2",
+    "pymupdf>=1.28.2",
+    "pymysql>=1.2.0",
+    "python-dotenv>=1.2.3",
+    "python-multipart>=0.0.32",
+    "sqlalchemy>=2.0.53",
+    "uvicorn[standard]>=0.53.0",
+    "alembic>=1.20.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.13.0",
+]

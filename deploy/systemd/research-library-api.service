@@ -1,0 +1,19 @@
+[Unit]
+Description=Research Library API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=research_library
+Group=research_library
+WorkingDirectory=/opt/research_library
+ExecStart=/opt/research_library/.venv/bin/python -B /opt/research_library/manage.py api
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=infinity
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,51 @@
+# 密钥与本机环境配置；保留可公开的配置模板
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+
+# Python虚拟环境、字节码及工具缓存
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# 前端依赖、构建产物及缓存
+node_modules/
+dist/
+dist-ssr/
+.vite/
+.vite-temp/
+
+# 编辑器及系统文件
+.idea/
+.vscode/
+.DS_Store
+
+# 论文文件、日志及运行记录
+/uploads/
+/logs/
+/.runtime/
+*.log
+
+# Redis持久化数据与旧版论文数据
+*.rdb
+*.aof
+/appendonlydir/
+/papers.json
+
+# 本机数据库及其辅助文件；迁移源码仍然提交
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
