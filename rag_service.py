@@ -1,10 +1,26 @@
-from dataclasses import dataclass
+import hashlib
+import time
+
+from dataclasses import asdict, dataclass
 from sqlalchemy.orm import Session
 
-import semantic_search
-import query_rewriter
+from urllib.error import URLError
 
+import embedding_service
+
+import query_rewriter
+import semantic_search
+import semantic_cache
+
+from cache_context import (
+    build_context,
+    can_reuse_features,
+    extract_features,
+    has_valid_sources,
+)
+from cache_models import CacheEntry
 from llm_service import generate_text
+from schemas import RAGSourceResponse
 
 @dataclass(frozen=True)
 class RAGSource:
@@ -20,7 +36,7 @@ class RAGResult:
     answer: str
     sources: list[RAGSource]
 
-def answer_research_question(
+def _generate_research_answer(
         db: Session,
         task_id: int,
         question: str,
@@ -108,3 +124,145 @@ def answer_research_question(
         answer=answer,
         sources=sources,
     )
+
+def answer_research_question(
+    db: Session,
+    task_id: int,
+    question: str,
+    top_k: int = 5,
+) -> RAGResult:
+    """依次尝试完全匹配、语义匹配和原来的RAG生成。"""
+
+    question = question.strip()
+
+    if not question:
+        raise ValueError("问题不能为空")
+
+    if top_k < 1:
+        raise ValueError("top_k 必须大于0")
+
+    scope, source_map, catalog = build_context(
+        db,
+        task_id,
+        top_k,
+    )
+
+    entry_id = hashlib.sha256(
+        question.encode("utf-8")
+    ).hexdigest()
+
+    cached = semantic_cache.get_cache_entry(
+        scope,
+        entry_id,
+    )
+
+    if (
+        cached is not None
+        and has_valid_sources(cached, source_map)
+    ):
+        print("[问答缓存] 完全匹配命中")
+
+        return RAGResult(
+            question=question,
+            answer=cached.answer,
+            sources=[
+                RAGSource(**source.model_dump())
+                for source in cached.sources
+            ],
+        )
+
+    features = extract_features(question, catalog)
+
+    question_vector = None
+
+    if features.entities and features.intent != "other":
+        try:
+            question_vector = embedding_service.embed_texts(
+                [question]
+            )[0]
+        except (URLError, ValueError):
+            print("[问答缓存] 问题向量生成失败，跳过语义缓存")
+
+    if question_vector is not None:
+        candidates = semantic_cache.find_semantic_entries(
+            scope,
+            question_vector,
+        )
+
+        for candidate, score in candidates:
+            if not can_reuse_features(
+                candidate.features,
+                features,
+            ):
+                continue
+
+            if not has_valid_sources(
+                candidate,
+                source_map,
+            ):
+                continue
+
+            print(
+                "[问答缓存] 语义命中，"
+                f"相似度={score:.4f}，"
+                f"原问题={candidate.question}"
+            )
+
+            return RAGResult(
+                question=question,
+                answer=candidate.answer,
+                sources=[
+                    RAGSource(**source.model_dump())
+                    for source in candidate.sources
+                ],
+            )
+
+    print("[问答缓存] 未命中，执行原来的RAG流程")
+
+    started = time.perf_counter()
+
+    result = _generate_research_answer(
+        db=db,
+        task_id=task_id,
+        question=question,
+        top_k=top_k,
+    )
+
+    generation_seconds = time.perf_counter() - started
+
+    created_at = time.time()
+
+    entry = CacheEntry(
+        id=entry_id,
+        question=question,
+        answer=result.answer,
+        sources=[
+            RAGSourceResponse(**asdict(source))
+            for source in result.sources
+        ],
+        features=features,
+        created_at=created_at,
+        expires_at=(
+            created_at
+            + semantic_cache.CACHE_TTL_SECONDS
+        ),
+        generation_seconds=generation_seconds,
+    )
+
+    saved = semantic_cache.save_cache_entry(
+        scope,
+        entry,
+    )
+
+    print("[问答缓存] 答案保存成功：", saved)
+
+    if saved and question_vector is not None:
+        vector_saved = semantic_cache.save_cache_vector(
+            scope,
+            entry.id,
+            question_vector,
+        )
+
+        print("[问答缓存] 向量保存成功：", vector_saved)
+
+    return result

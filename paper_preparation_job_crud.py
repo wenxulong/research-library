@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, select, update
 
 from model import Paper, PaperDocument, PaperPreparationJob
@@ -71,6 +71,39 @@ def get_preparation_job(
     """按编号查询论文准备作业。"""
 
     return db.get(PaperPreparationJob, job_id)
+
+def get_preparation_jobs_by_paper(
+    db: Session,
+    paper_id: int,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[PaperPreparationJob]:
+    """查询指定论文的准备作业历史，最新记录排在前面。"""
+
+    statement = (
+        select(PaperPreparationJob)
+        .options(
+            load_only(
+                PaperPreparationJob.id,
+                PaperPreparationJob.paper_id,
+                PaperPreparationJob.document_id,
+                PaperPreparationJob.status,
+                PaperPreparationJob.stage,
+                PaperPreparationJob.error_message,
+                PaperPreparationJob.created_at,
+                PaperPreparationJob.started_at,
+                PaperPreparationJob.finished_at,
+            )
+        )
+        .where(PaperPreparationJob.paper_id == paper_id)
+        .order_by(PaperPreparationJob.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    jobs = db.scalars(statement).all()
+
+    return list(jobs)
 
 def claim_preparation_job(
     db: Session,

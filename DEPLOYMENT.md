@@ -7,7 +7,7 @@ Mac本机使用已有MySQL、Redis、Ollama，API与单进程Celery Worker分开
 ## 1. 依赖和配置
 
 ```bash
-cd /Users/wenxulong/research_library
+cd /path/to/research-library
 uv sync --locked
 ```
 
@@ -109,7 +109,7 @@ MySQL、Redis、Ollama作为外部前置服务单独部署；模板不会安装�
 - 运行自动化测试：
 
 ```bash
-.venv/bin/python -B -m unittest test_main test_db_migrations test_backend_delivery -q
+.venv/bin/python -B -m unittest discover -q
 ```
 
 测试使用独立SQLite及服务模拟，不能改成正式数据库进行删表测试。
@@ -124,4 +124,15 @@ MySQL、Redis、Ollama作为外部前置服务单独部署；模板不会安装�
 
 关联变化后，已有分析标记为 stale（过期），旧正文保留在任务结果中，但不能再用于当前审校、版本恢复或新报告；重新分析后恢复 completed。审校及重新分析保存前会比较输入版本，输入变化返回409，不覆盖最新结果。已完成报告仍作为历史快照展示。
 
-普通前端修改请求最多等待30秒，读取最多15秒；同步模型请求最多等待15分钟，并提供“停止等待”。停止等待/超时只结束浏览器请求，不取消后端执行；操作结果未确认时应先刷新或查询状态，避免重复提交。
+普通前端修改请求最多等待30秒，读取最多15秒；同步模型请求最多等待15分钟，；部分页面提供“停止等待”，实验与写作页面没有主动取消后端执行的功能。停止等待/超时只结束浏览器请求，不取消后端执行；操作结果未确认时应先刷新或查询状态，避免重复提交。
+
+
+## 当前数据库和写作功能
+
+当前迁移头为`0006_paper_drafts`。从旧版本升级时必须带齐0003～0006迁移源码；不要只复制model.py或手工新建部分表。
+
+论文初稿正文和材料快照保存在MySQL的paper_drafts表，备份时包含该表及experiment_imports、research_question_sets。Redis缓存丢失不影响这些已保存结果。
+
+研究方案、实验分析、初稿生成和章节扩写仍为同步API请求，不经Celery。章节扩写只生成建议；用户确认后PATCH保存；GET读取及导出不调用模型。反向代理的读取超时应适应同步模型请求，前端超时不代表服务器取消执行。
+
+问答语义缓存使用Redis的VADD/VSIM命令。仅有普通队列连接不代表支持向量命令；不支持时会跳过语义缓存。此特性不改变MySQL持久化要求。

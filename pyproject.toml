@@ -16,6 +16,7 @@ dependencies = [
     "sqlalchemy>=2.0.53",
     "uvicorn[standard]>=0.53.0",
     "alembic>=1.20.0",
+    "matplotlib>=3.11.2",
 ]
 
 [dependency-groups]

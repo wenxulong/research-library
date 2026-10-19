@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => {
       host: "127.0.0.1", port: 4173, strictPort: true,
       proxy: {
         ...proxy,
-        ...Object.fromEntries(["/papers", "/research-tasks", "/paper-preparation-jobs", "/report-jobs", "/health"].map(path => [path, { target: env.VITE_API_TARGET || "http://127.0.0.1:8000", changeOrigin: true }])),
+        ...Object.fromEntries(["/papers", "/research-tasks", "/research-question-sets", "/experiment-imports", "/paper-drafts", "/paper-preparation-jobs", "/report-jobs", "/health"].map(path => [path, { target: env.VITE_API_TARGET || "http://127.0.0.1:8000", changeOrigin: true }])),
       },
     },
   }

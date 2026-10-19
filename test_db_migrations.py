@@ -7,6 +7,7 @@ import unittest
 
 from alembic import command
 from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 import model
@@ -18,6 +19,7 @@ class TestDatabaseMigrations(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite://")
         self.addCleanup(self.engine.dispose)
+        self.latest_revision = ScriptDirectory.from_config(migrations.migration_config()).get_current_head()
         # env.py 必须复用传入连接；若误用正式引擎，测试立即失败。
         self.enterContext(patch("database.engine.connect", side_effect=AssertionError("禁止正式连接")))
 
@@ -29,8 +31,10 @@ class TestDatabaseMigrations(unittest.TestCase):
         self.assertEqual(self.version(), ())
 
     def seed_legacy(self):
-        Base.metadata.create_all(self.engine)
+        # 旧库必须来自固定历史结构，不能使用不断增加字段的当前模型。
         with self.engine.begin() as connection:
+            command.upgrade(migrations.migration_config(connection), migrations.PREPARATION_REVISION)
+            connection.execute(text("DROP TABLE alembic_version"))
             connection.execute(text("INSERT INTO papers (id,title,author,year,notes) VALUES (9,'原论文','作者',2025,'保留备注')"))
             connection.execute(text("INSERT INTO research_tasks (id,title,question,status,result) VALUES (10,'原任务','原问题','completed','原分析')"))
 
@@ -40,7 +44,7 @@ class TestDatabaseMigrations(unittest.TestCase):
             self.assertEqual(connection.execute(text("SELECT result FROM research_tasks WHERE id=10")).scalar_one(), "原分析")
 
     def test_empty_database_replays_frozen_initial_revision(self):
-        self.assertEqual(migrations.initialize_database(self.engine), migrations.PREPARATION_REVISION)
+        self.assertEqual(migrations.initialize_database(self.engine), self.latest_revision)
         self.assertEqual(set(inspect(self.engine).get_table_names()), set(Base.metadata.tables) | {"alembic_version"})
         with self.engine.connect() as connection:
             self.assertEqual(migrations.schema_differences(connection, Base.metadata), [])
@@ -53,7 +57,7 @@ class TestDatabaseMigrations(unittest.TestCase):
     def test_legacy_adoption_does_not_execute_create_table_upgrade(self):
         self.seed_legacy()
         migrations.initialize_database(self.engine)
-        self.assertEqual(self.version(), (migrations.PREPARATION_REVISION,))
+        self.assertEqual(self.version(), (self.latest_revision,))
         self.assert_records()
 
     def test_repeated_initialization_preserves_data_and_version(self):
@@ -61,13 +65,13 @@ class TestDatabaseMigrations(unittest.TestCase):
         migrations.initialize_database(self.engine)
         migrations.initialize_database(self.engine)
         self.assert_records()
-        self.assertEqual(self.version(), (migrations.PREPARATION_REVISION,))
+        self.assertEqual(self.version(), (self.latest_revision,))
 
     def test_ten_table_legacy_schema_upgrades_and_preserves_data(self):
         self.seed_legacy()
         model.PaperPreparationJob.__table__.drop(self.engine)
         migrations.initialize_database(self.engine)
-        self.assertEqual(self.version(), (migrations.PREPARATION_REVISION,))
+        self.assertEqual(self.version(), (self.latest_revision,))
         self.assertIn("paper_preparation_jobs", inspect(self.engine).get_table_names())
         self.assert_records()
 
@@ -127,7 +131,7 @@ class TestDatabaseMigrations(unittest.TestCase):
         with self.engine.begin() as connection:
             connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
         migrations.initialize_database(self.engine)
-        self.assertEqual(self.version(), (migrations.PREPARATION_REVISION,))
+        self.assertEqual(self.version(), (self.latest_revision,))
         self.assert_records()
 
     def test_defaults_normalize_only_known_equivalent_time_expressions(self):
@@ -160,8 +164,9 @@ class TestDatabaseMigrations(unittest.TestCase):
         with TemporaryDirectory() as directory:
             script_dir = Path(directory) / "migrations"
             shutil.copytree(migrations.ROOT / "migrations", script_dir)
-            (script_dir / "versions/0003_test.py").write_text(
-                "from alembic import op\nimport sqlalchemy as sa\nrevision='0003_test'\ndown_revision='0002_paper_preparation'\n"
+            (script_dir / "versions/test_future.py").write_text(
+                "from alembic import op\nimport sqlalchemy as sa\nrevision='test_future'\n"
+                f"down_revision={self.latest_revision!r}\n"
                 "def upgrade():\n    op.add_column('papers', sa.Column('test_future', sa.Text(), nullable=True))\n"
                 "def downgrade():\n    op.drop_column('papers', 'test_future')\n"
             )
@@ -171,8 +176,8 @@ class TestDatabaseMigrations(unittest.TestCase):
                 result.set_main_option("script_location", str(script_dir))
                 return result
             with patch("db_migrations.migration_config", side_effect=config):
-                self.assertEqual(migrations.initialize_database(self.engine), "0003_test")
-                self.assertEqual(migrations.initialize_database(self.engine), "0003_test")
+                self.assertEqual(migrations.initialize_database(self.engine), "test_future")
+                self.assertEqual(migrations.initialize_database(self.engine), "test_future")
             self.assertIn("test_future", {c["name"] for c in inspect(self.engine).get_columns("papers")})
             self.assert_records()
 
@@ -189,6 +194,28 @@ class TestDatabaseMigrations(unittest.TestCase):
         migrations.initialize_database(self.engine)
         with self.engine.begin() as connection:
             command.check(migrations.migration_config(connection))
+
+    def test_plan_column_upgrade_preserves_existing_selection(self):
+        with self.engine.begin() as connection:
+            command.upgrade(migrations.migration_config(connection), "0003_research_questions")
+            connection.execute(text(
+                "INSERT INTO research_tasks (id,title,question,status) VALUES (10,'原任务','原问题','completed')"
+            ))
+            connection.execute(text(
+                "INSERT INTO report_jobs (id,task_id,status,stage,analysis_snapshot) "
+                "VALUES (12,10,'succeeded','finished','{}')"
+            ))
+            connection.execute(text(
+                "INSERT INTO research_question_sets "
+                "(id,task_id,report_job_id,candidates,sources,selected_candidate_number,selected_question) "
+                "VALUES (7,10,12,:candidates,'[]',1,'用户已选的问题')"
+            ), {"candidates": '[{"research_question":"原候选"}]'})
+            command.upgrade(migrations.migration_config(connection), "head")
+            selected, question, plan = connection.execute(text(
+                "SELECT selected_candidate_number,selected_question,plan FROM research_question_sets WHERE id=7"
+            )).one()
+            self.assertEqual((selected, question, plan), (1, "用户已选的问题", None))
+            self.assertEqual(migrations.schema_differences(connection, Base.metadata), [])
 
 
 if __name__ == "__main__":

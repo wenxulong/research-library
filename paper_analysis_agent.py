@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from citation_utils import extract_source_numbers
 
 from sqlalchemy.orm import Session
+from pydantic import ValidationError
+from schemas import ResearchEntityResponse
 
 import query_rewriter
 import semantic_search
@@ -48,6 +50,7 @@ class PaperAnalysisResult:
     limitations: list[str]
     sources: list[AnalysisSource]
     evidence_notes: list[str] = field(default_factory=list)
+    entities: list[dict] = field(default_factory=list)
 
 def collect_analysis_matches(
     db: Session,
@@ -208,6 +211,18 @@ def parse_analysis_response(
                 "只能包含字符串"
             )
 
+    # 实体是对象列表，与上面的陈述字符串列表分别解析。
+    entities = data.setdefault("entities", [])
+    if not isinstance(entities, list):
+        raise RuntimeError("论文分析结果中的entities必须是列表")
+    try:
+        data["entities"] = [
+            ResearchEntityResponse.model_validate(item).model_dump()
+            for item in entities
+        ]
+    except ValidationError as error:
+        raise RuntimeError("论文分析结果中的实体格式不正确") from error
+
     return data
 
 
@@ -234,6 +249,12 @@ def validate_analysis_citations(
                 raise RuntimeError(
                     f"论文分析结果中的{field_name}{error}"
                 ) from error
+
+    # 这里是分析资料编号，不是数据库的论文编号。
+    for entity in analysis_data.get("entities", []):
+        for number in entity["source_numbers"]:
+            if not 1 <= number <= source_count:
+                raise RuntimeError(f"实体引用了不存在的资料编号：{number}")
 
 
 def analyze_research_task(
@@ -276,6 +297,12 @@ def analyze_research_task(
         "evidence_notes记录当前引用原文不足、未检索到的信息或引文核对说明，不能放入limitations。"
         "未检索到的信息只能写当前资料未提供，不能断言整篇论文不存在。"
         "conclusions只描述本文主要发现，不要把未来工作当作已经得到的结论。"
+        "同时从提供的论文资料中抽取有明确名称的专业实体。"
+        "实体可以包括算法、模型、数据集、评价指标、方法或其他专业概念。"
+        "每条实体使用canonical_name作为统一名称，"
+        "aliases只填写原文明确出现的别名、缩写或全称，不要猜测。"
+        "source_numbers填写能够支持该实体的资料编号，不是论文编号。"
+        "同一实体尽量合并，不要重复返回；未出现的实体不要补充。"
         "你必须只返回一个合法JSON对象，"
         "不要使用Markdown代码块，不要添加解释文字。"
     )
@@ -290,10 +317,19 @@ def analyze_research_task(
         '  "experiments": ["实验信息1", "实验信息2"],\n'
         '  "conclusions": ["主要结论1", "主要结论2"],\n'
         '  "limitations": ["论文自身的局限性1"],\n'
-        '  "evidence_notes": ["当前资料不足说明1"]\n'
+        '  "evidence_notes": ["当前资料不足说明1"],\n'
+        '  "entities": [\n'
+        '    {\n'
+        '      "canonical_name": "原文中的实体名称",\n'
+        '      "entity_type": "algorithm",\n'
+        '      "aliases": [],\n'
+        '      "source_numbers": [1]\n'
+        '    }\n'
+        '  ]\n'
         "}\n"
-        "数组中每一项都必须是字符串，"
-        "并在有资料支持的内容后标注资料编号。"
+        "methods、experiments、conclusions、limitations和evidence_notes"
+        "数组中的每项必须是字符串，并在有资料支持的内容后标注资料编号。"
+        "entities数组中的每项必须是上述格式的对象；没有可提取实体时返回空数组。"
     )
 
     response_text = generate_text(
@@ -319,4 +355,5 @@ def analyze_research_task(
         limitations=analysis_data["limitations"],
         evidence_notes=analysis_data["evidence_notes"],
         sources=sources,
+        entities=analysis_data["entities"],
     )

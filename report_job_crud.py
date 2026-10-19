@@ -1,7 +1,7 @@
 import task_crud
 from paper_operation_guard import paper_operation_locks, ensure_no_active_preparation
 from pydantic import ValidationError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from comparison_service import build_comparison_context
 from model import ReportJob, ResearchTask, ResearchTaskPaper
@@ -92,6 +92,36 @@ def get_report_job(
     """根据作业编号查询记录，不存在时返回None。"""
 
     return db.get(ReportJob, job_id)
+
+def get_report_jobs_by_task(
+    db: Session,
+    task_id: int,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[ReportJob]:
+    """查询指定研究任务的报告作业，最新记录排在前面。"""
+    statement = (
+        select(ReportJob)
+        .options(
+            load_only(
+                ReportJob.id,
+                ReportJob.task_id,
+                ReportJob.status,
+                ReportJob.stage,
+                ReportJob.error_message,
+                ReportJob.created_at,
+                ReportJob.started_at,
+                ReportJob.finished_at,
+            )
+        )
+        .where(ReportJob.task_id == task_id)
+        .order_by(ReportJob.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    jobs = db.scalars(statement).all()
+
+    return list(jobs)
 
 def claim_report_job(
     db: Session,

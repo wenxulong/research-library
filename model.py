@@ -520,3 +520,135 @@ class PaperPreparationJob(Base):
         DateTime,
         nullable=True,
     )
+
+class ResearchQuestionSet(Base):
+    """保存一组候选问题及用户的选择结果。"""
+
+    __tablename__ = "research_question_sets"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("research_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    report_job_id: Mapped[int] = mapped_column(
+        ForeignKey("report_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    candidates: Mapped[list[dict]] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    sources: Mapped[list[dict]] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    selected_candidate_number: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    selected_question: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    plan: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+class ExperimentImport(Base):
+    """保存一次实验结果导入及其对应的研究计划。"""
+
+    __tablename__ = "experiment_imports"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    question_set_id: Mapped[int] = mapped_column(
+        ForeignKey("research_question_sets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    filename: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    raw_csv: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    plan_snapshot: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    rows: Mapped[list[dict]] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+class PaperDraft(Base):
+    """保存已生成的论文初稿及其写作材料。"""
+
+    __tablename__ = "paper_drafts"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    import_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "experiment_imports.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    draft_data: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    materials_snapshot: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )

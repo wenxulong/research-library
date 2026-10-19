@@ -1889,7 +1889,8 @@ class TestRAGService(unittest.TestCase):
             ) as mock_generate,
         ):
             with TestingSessionLocal() as db:
-                result = rag_service.answer_research_question(
+                # 此测试只验证原 RAG 的提示词和引用；缓存入口由 test_exact_cache 覆盖。
+                result = rag_service._generate_research_answer(
                     db=db,
                     task_id=1,
                     question="RAG有哪些分块方法？",
@@ -2143,6 +2144,7 @@ class TestResearchTaskAnalysisAPI(unittest.TestCase):
                     "当前资料不足以分析完整局限性。",
                 ],
                 "evidence_notes": [],
+                "entities": [],
                 "sources": [
                     {
                         "paper_id": 3,
@@ -2417,8 +2419,6 @@ class TestReferenceDetection(unittest.TestCase):
                 self.assertTrue(semantic_search.looks_like_reference_chunk(text))
 
 
-
-
 class TestReviewAgent(unittest.TestCase):
     """检查审校解析、真实证据提示词和逐条处理逻辑；模拟模型请求。"""
 
@@ -2620,8 +2620,6 @@ class TestResearchTaskReviewAPI(unittest.TestCase):
         self.assertIn("正确的JSON", response.json()["detail"])
 
 
-
-
     def _save_review_fixture(self):
         review = {
             "task_id": self.task_id,
@@ -2694,8 +2692,6 @@ class TestResearchTaskReviewAPI(unittest.TestCase):
         })
         self.assertEqual(changed.status_code, 200, changed.text)
         self.assertEqual(client.get(f"/research-tasks/{self.task_id}/review").status_code, 404)
-
-
 
 
 class TestRevisionAgent(unittest.TestCase):
@@ -2918,8 +2914,6 @@ class TestResearchTaskRevisionAPI(unittest.TestCase):
                 with TestingSessionLocal() as db:
                     task = db.get(ResearchTask, self.task_id)
                     self.assertEqual((task.result, task.review_result, task.status), self.original)
-
-
 
 
     def test_combined_revision_and_recheck_preserves_saved_inputs(self):
@@ -3180,8 +3174,6 @@ class TestRevisionRecheck(unittest.TestCase):
         generate.assert_not_called()
 
 
-
-
 class TestFieldClassification(unittest.TestCase):
     """检查分类模型输出规则与提示词，不访问真实模型。"""
 
@@ -3237,8 +3229,6 @@ class TestFieldClassification(unittest.TestCase):
         self.assertIn("当前字段：limitations", arguments["user_prompt"])
         self.assertIn("不判断论文事实是否正确", arguments["system_prompt"])
         self.assertEqual(self.revision.model_dump(), before)
-
-
 
 
 class TestFieldSplitter(unittest.TestCase):
@@ -3373,8 +3363,6 @@ class TestSplitVerification(unittest.TestCase):
         self.assertEqual(checks[1].review.verdict,"insufficient_evidence")
 
 
-
-
 class TestEvidenceNotes(unittest.TestCase):
     """区分论文局限性和检索证据不足，并兼容旧分析数据。"""
 
@@ -3474,7 +3462,6 @@ class TestEvidenceNotes(unittest.TestCase):
         ):
             result=paper_analysis_agent.analyze_research_task(Mock(),1,"研究问题")
         self.assertEqual(result.evidence_notes,data["evidence_notes"])
-
 
 
 class TestEvidenceNoteAdoptionAPI(unittest.TestCase):
@@ -3839,7 +3826,6 @@ class TestEvidenceNoteAdoptionAPI(unittest.TestCase):
         detail = client.get(f"/research-tasks/{self.task_id}/analysis/versions/{data['version_id']}")
         self.assertEqual(detail.status_code, 200, detail.text)
         self.assertEqual(detail.json()["updated_analysis"], self.payload["base_analysis"])
-
 
 
 class TestAnalysisVersionHistoryAPI(unittest.TestCase):
@@ -4781,7 +4767,6 @@ class TestPerPaperAnalysisRetrieval(unittest.TestCase):
                 paper_analysis_agent.collect_analysis_matches(Mock(), 6, "研究问题")
 
 
-
 class TestComparisonReviewAPI(ComparisonDatabaseFixture, unittest.TestCase):
     """真实数据库和引用映射，只模拟审校模型网络请求。"""
 
@@ -4910,7 +4895,6 @@ class TestComparisonReviewAPI(ComparisonDatabaseFixture, unittest.TestCase):
         self.assertEqual(item["verdict"], "partially_supported")
         self.assertEqual(item["reason"], reason)
         self.assertEqual(item["claim"], payload["method_comparisons"][0]["text"])
-
 
 
 class TestStructuredJSONOutput(unittest.TestCase):
@@ -5104,7 +5088,6 @@ class TestCheckedComparisonWorkflow(ComparisonDatabaseFixture, unittest.TestCase
         self.assertTrue(response.json()["passed"])
         self.assertEqual(generate.call_count, 2)
         self.assertEqual(self._snapshot(), before)
-
 
 
 class TestNeighborChunks(unittest.TestCase):
@@ -5564,7 +5547,6 @@ class TestComparisonEvidenceAssembly(ComparisonDatabaseFixture, unittest.TestCas
         self.assertEqual(report.model_dump(), original_report)
 
 
-
 class TestSupplementedComparisonAPI(ComparisonDatabaseFixture, unittest.TestCase):
     """HTTP入口测试：使用隔离数据库，模型输出模拟，真实执行内部流程。"""
 
@@ -5632,7 +5614,6 @@ class TestSupplementedComparisonAPI(ComparisonDatabaseFixture, unittest.TestCase
                 response = client.post(self.url)
                 self.assertEqual(response.status_code, status)
                 self.assertEqual(response.json()["detail"], str(error))
-
 
 
 class TestReportJobSubmission(ComparisonDatabaseFixture, unittest.TestCase):

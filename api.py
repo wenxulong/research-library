@@ -1,8 +1,11 @@
 """定义科研资料库的 FastAPI 接口，并协调数据库和文件服务。"""
+import io
 
 from fastapi import Depends, FastAPI, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
+from research_report_export import build_research_report_zip
 
+import research_question_agent
 import crud
 import task_crud
 import document_crud
@@ -18,7 +21,20 @@ import comparison_review
 import comparison_workflow
 import comparison_evidence_workflow
 import comparison_report_builder
+import research_question_crud
+import research_plan_service
+import experiment_import_service
+import experiment_statistics_service
+import experiment_chart_service
+import experiment_analysis_agent
+import paper_draft_service
+import paper_draft_agent
+import paper_draft_crud
 
+from model import ExperimentImport
+from model import PaperDraft
+from model import ResearchQuestionSet
+from paper_draft_export import build_paper_draft_zip
 from pdf_parser import ExtractedPage
 from text_chunker import chunk_pages
 from pdf_parser import extract_pdf_text
@@ -56,6 +72,24 @@ from schemas import (
     ComparisonContextResponse,
     ComparisonReportResponse,
     CheckedComparisonReportResponse,
+    ReportJobSummaryResponse,
+    PaperPreparationJobSummaryResponse,
+    ResearchQuestionsResponse,
+    SavedResearchQuestionsResponse,
+    ResearchQuestionSelectRequest,
+    ResearchConditions,
+    ResearchPlanResponse,
+    ExperimentImportResponse,
+    ExperimentStatisticsResponse,
+    ExperimentAnalysisRequest,
+    ExperimentAnalysisResponse,
+    PaperDraftRequest,
+    PaperDraftResponse,
+    PaperDraftMaterials,
+    SavedPaperDraftResponse,
+    PaperDraftContent,
+    PaperDraftExpandRequest,
+    PaperDraftExpandResponse,
 )
 
 from urllib.error import URLError
@@ -1108,6 +1142,7 @@ def analysis_research_task_endpoint(
         limitations=result.limitations,
         evidence_notes=result.evidence_notes,
         sources=response_sources,
+        entities=result.entities,
     )
 
     task_crud.save_task_analysis(
@@ -1665,6 +1700,36 @@ def submit_report_job(
     return job
 
 @app.get(
+    "/research-tasks/{task_id}/report-jobs",
+    response_model=list[ReportJobSummaryResponse],
+)
+def read_research_task_report_jobs(
+    task_id: int,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """查询指定研究任务的报告作业历史。"""
+
+    task = task_crud.get_task_by_id(
+        db=db,
+        task_id=task_id,
+    )
+
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这个研究任务",
+        )
+
+    return report_job_crud.get_report_jobs_by_task(
+        db=db,
+        task_id=task_id,
+        limit=limit,
+        offset=offset,
+    )
+
+@app.get(
     "/report-jobs/{job_id}",
     response_model=ReportJobResponse,
 )
@@ -1827,3 +1892,725 @@ def read_paper_preparation_job(
         )
 
     return job
+
+@app.get(
+    "/papers/{paper_id}/preparation-jobs",
+    response_model=list[PaperPreparationJobSummaryResponse],
+)
+def read_paper_preparation_jobs(
+    paper_id: int,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """查询指定论文的准备作业历史。"""
+
+    paper = crud.get_paper_by_id(
+        db=db,
+        paper_id=paper_id,
+    )
+
+    if paper is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这篇论文",
+        )
+
+    return paper_preparation_job_crud.get_preparation_jobs_by_paper(
+        db=db,
+        paper_id=paper_id,
+        limit=limit,
+        offset=offset,
+    )
+
+@app.post(
+    "/report-jobs/{job_id}/research-questions",
+    response_model=SavedResearchQuestionsResponse,
+)
+def generate_research_questions_endpoint(
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    """根据一份已通过审校的报告生成候选研究问题。"""
+
+    job = report_job_crud.get_report_job(db, job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这个报告作业",
+        )
+
+    if job.status != "succeeded" or not job.result:
+        raise HTTPException(
+            status_code=409,
+            detail="报告尚未生成成功",
+        )
+
+    try:
+        checked = CheckedComparisonReportResponse.model_validate(
+            job.result,
+        )
+
+        if not checked.passed:
+            raise ValueError("请先使用已通过审校的对比报告")
+
+        result = research_question_agent.generate_research_questions(
+            db=db,
+            report_job_id=job.id,
+            report=checked.report,
+        )
+
+        return research_question_crud.save_research_questions(
+            db=db,
+            result=result,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        ) from error
+
+@app.get(
+    "/research-question-sets/{set_id}",
+    response_model=SavedResearchQuestionsResponse,
+)
+def read_research_question_set(
+    set_id: int,
+    db: Session = Depends(get_db),
+):
+    """读取一组已保存的候选问题及选择结果。"""
+
+    record = db.get(ResearchQuestionSet, set_id)
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这组候选研究问题",
+        )
+    return record
+
+@app.patch(
+    "/research-question-sets/{set_id}/selection",
+    response_model=SavedResearchQuestionsResponse,
+)
+def select_research_question_endpoint(
+    set_id: int,
+    selection: ResearchQuestionSelectRequest,
+    db: Session = Depends(get_db),
+):
+    """选择候选问题，或修改最终确认的问题表述。"""
+    record = db.get(ResearchQuestionSet, set_id)
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这组候选研究问题",
+        )
+
+    try:
+        return research_question_crud.select_research_question(
+            db=db,
+            record=record,
+            selection=selection,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+@app.post(
+    "/research-question-sets/{set_id}/plan",
+    response_model=ResearchPlanResponse,
+)
+def generate_research_plan_endpoint(
+    set_id: int,
+    conditions: ResearchConditions,
+    db: Session = Depends(get_db),
+):
+    """为用户选定的问题生成研究方案和实验计划。"""
+
+    record = db.get(ResearchQuestionSet, set_id)
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这组候选研究问题",
+        )
+
+    try:
+        return research_plan_service.generate_research_plan(
+            db=db,
+            record=record,
+            conditions=conditions,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        ) from error
+
+@app.get(
+    "/research-question-sets/{set_id}/plan",
+    response_model=ResearchPlanResponse,
+)
+def read_research_plan_endpoint(
+    set_id: int,
+    db: Session = Depends(get_db),
+):
+    """读取当前保存的研究方案和实验计划。"""
+    record = db.get(ResearchQuestionSet, set_id)
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这组候选研究问题",
+        )
+    if record.plan is None:
+        raise HTTPException(
+            status_code=404,
+            detail="尚未生成研究计划，或选择问题后需要重新生成",
+        )
+
+    return ResearchPlanResponse.model_validate(record.plan)
+
+@app.post(
+    "/research-question-sets/{set_id}/experiment-imports",
+    response_model=ExperimentImportResponse,
+    status_code=201,
+)
+async def import_experiment_results_endpoint(
+    set_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """上传CSV，保存实验结果和对应计划。"""
+
+    record = db.get(ResearchQuestionSet, set_id)
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这组候选研究问题",
+        )
+
+    try:
+        content = await file.read()
+
+        raw_csv = content.decode("utf-8-sig")
+
+        return experiment_import_service.import_experiment_results(
+            db=db,
+            record=record,
+            filename=file.filename or "results.csv",
+            raw_csv=raw_csv,
+        )
+
+    except UnicodeDecodeError as error:
+        raise HTTPException(
+            status_code=400,
+            detail="请上传UTF-8编码的CSV文件",
+        ) from error
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    finally:
+        await file.close()
+
+@app.get(
+    "/experiment-imports/{import_id}",
+    response_model=ExperimentImportResponse,
+)
+def read_experiment_import(
+    import_id: int,
+    db: Session = Depends(get_db),
+):
+    """读取一批已导入的实验结果。"""
+
+    imported = db.get(ExperimentImport, import_id)
+
+    if imported is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这次实验结果导入",
+        )
+
+    return imported
+
+@app.get(
+    "/experiment-imports/{import_id}/statistics",
+    response_model=ExperimentStatisticsResponse,
+)
+def read_experiment_statistics(
+    import_id: int,
+    metric: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+):
+    """读取一次导入中指定指标的分组统计。"""
+
+    imported = db.get(ExperimentImport, import_id)
+
+    if imported is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这次实验结果导入",
+        )
+
+    try:
+        return experiment_statistics_service.summarize_experiment_results(
+            imported=imported,
+            metric=metric,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+@app.get(
+    "/experiment-imports/{import_id}/chart",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+)
+def download_experiment_chart(
+    import_id: int,
+    metric: str = Query(min_length=1),
+    dataset: str = Query(min_length=1),
+    scenario: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+):
+    """下载指定指标、数据集和场景的方法对比图。"""
+
+    imported = db.get(ExperimentImport, import_id)
+
+    if imported is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这次实验结果导入",
+        )
+
+    try:
+        statistics = (
+            experiment_statistics_service
+            .summarize_experiment_results(
+                imported=imported,
+                metric=metric,
+            )
+        )
+
+        image_bytes = experiment_chart_service.build_experiment_chart(
+            statistics=statistics,
+            dataset=dataset,
+            scenario=scenario,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    return Response(
+        content=image_bytes,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="experiment-{import_id}.png"'
+            ),
+        },
+    )
+
+@app.post(
+    "/experiment-imports/{import_id}/analysis",
+    response_model=ExperimentAnalysisResponse,
+)
+def analyze_experiment_results(
+    import_id: int,
+    request: ExperimentAnalysisRequest,
+    db: Session = Depends(get_db),
+):
+    """根据一次实验导入记录生成多指标分析。"""
+    imported = db.get(ExperimentImport, import_id)
+    if imported is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这次实验结果导入",
+        )
+
+    try:
+        return experiment_analysis_agent.generate_experiment_analysis(
+            imported=imported,
+            request=request,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        ) from error
+
+@app.post(
+    "/experiment-imports/{import_id}/research-report/export",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {
+                "application/zip": {},
+            },
+        },
+    },
+)
+def export_research_report(
+    import_id: int,
+    request: ExperimentAnalysisRequest,
+    db: Session = Depends(get_db),
+):
+    """生成实验分析并导出完整研究报告压缩包。"""
+    imported = db.get(ExperimentImport, import_id)
+    if imported is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这次实验结果导入",
+        )
+
+    try:
+        analysis = experiment_analysis_agent.generate_experiment_analysis(
+            imported=imported,
+            request=request,
+        )
+
+        archive_bytes = build_research_report_zip(
+            imported=imported,
+            analysis=analysis,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        ) from error
+
+    return Response(
+        content=archive_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="research-report-{import_id}.zip"'
+            ),
+        },
+    )
+
+@app.post(
+    "/experiment-imports/{import_id}/paper-draft",
+    response_model=SavedPaperDraftResponse,
+)
+def create_paper_draft(
+    import_id: int,
+    request: PaperDraftRequest,
+    db: Session = Depends(get_db),
+):
+    """生成论文初稿，并保存正文与写作材料。"""
+
+    imported = db.get(
+        ExperimentImport,
+        import_id,
+    )
+
+    if imported is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这次实验结果导入",
+        )
+
+    try:
+        materials = paper_draft_service.build_paper_draft_materials(
+            db=db,
+            imported=imported,
+            request=request,
+        )
+
+        draft = paper_draft_agent.generate_paper_draft(
+            materials=materials,
+        )
+
+        record = paper_draft_crud.save_paper_draft(
+            db=db,
+            draft=draft,
+            materials=materials,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        ) from error
+
+    return paper_draft_crud.to_saved_paper_draft(record)
+
+@app.post(
+    "/experiment-imports/{import_id}/paper-draft/export",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {
+                "application/zip": {},
+            },
+        },
+    },
+)
+def export_paper_draft(
+    import_id: int,
+    request: PaperDraftRequest,
+    db: Session = Depends(get_db),
+):
+    """生成论文初稿，并下载正文、材料和图表压缩包。"""
+
+    imported = db.get(
+        ExperimentImport,
+        import_id,
+    )
+
+    if imported is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这次实验结果导入",
+        )
+
+    try:
+        materials = paper_draft_service.build_paper_draft_materials(
+            db=db,
+            imported=imported,
+            request=request,
+        )
+
+        draft = paper_draft_agent.generate_paper_draft(
+            materials=materials,
+        )
+
+        archive_bytes = build_paper_draft_zip(
+            db=db,
+            draft=draft,
+            materials=materials,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        ) from error
+
+    return Response(
+        content=archive_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="paper-draft-{import_id}.zip"'
+            ),
+        },
+    )
+
+@app.get(
+    "/paper-drafts/{draft_id}",
+    response_model=SavedPaperDraftResponse,
+)
+def read_paper_draft(
+    draft_id: int,
+    db: Session = Depends(get_db),
+):
+    """读取已保存的论文初稿，不调用模型。"""
+
+    record = db.get(
+        PaperDraft,
+        draft_id,
+    )
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这份论文初稿",
+        )
+
+    return paper_draft_crud.to_saved_paper_draft(record)
+
+@app.get(
+    "/paper-drafts/{draft_id}/export",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {
+                "application/zip": {},
+            },
+        },
+    },
+)
+def export_saved_paper_draft(
+    draft_id: int,
+    db: Session = Depends(get_db),
+):
+    """使用已保存的正文和材料导出，不重新生成初稿。"""
+
+    record = db.get(
+        PaperDraft,
+        draft_id,
+    )
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这份论文初稿",
+        )
+
+    draft = PaperDraftResponse.model_validate(
+        record.draft_data,
+    )
+
+    materials = PaperDraftMaterials.model_validate(
+        record.materials_snapshot,
+    )
+
+    try:
+        archive_bytes = build_paper_draft_zip(
+            db=db,
+            draft=draft,
+            materials=materials,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    return Response(
+        content=archive_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="paper-draft-{draft_id}.zip"'
+            ),
+        },
+    )
+
+@app.patch(
+    "/paper-drafts/{draft_id}",
+    response_model=SavedPaperDraftResponse,
+)
+def update_saved_paper_draft(
+    draft_id: int,
+    content: PaperDraftContent,
+    db: Session = Depends(get_db),
+):
+    """保存人工修改的论文正文，不调用模型。"""
+
+    record = db.get(
+        PaperDraft,
+        draft_id,
+    )
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这份论文初稿",
+        )
+
+    try:
+        updated_record = paper_draft_crud.update_paper_draft(
+            db=db,
+            record=record,
+            content=content,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    return paper_draft_crud.to_saved_paper_draft(
+        updated_record,
+    )
+
+@app.post(
+    "/paper-drafts/{draft_id}/expand",
+    response_model=PaperDraftExpandResponse,
+)
+def expand_saved_paper_draft(
+    draft_id: int,
+    request: PaperDraftExpandRequest,
+    db: Session = Depends(get_db),
+):
+    """生成章节扩写建议，不修改已经保存的初稿。"""
+
+    record = db.get(
+        PaperDraft,
+        draft_id,
+    )
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="没有找到这份论文初稿",
+        )
+
+    draft = PaperDraftResponse.model_validate(
+        record.draft_data,
+    )
+
+    materials = PaperDraftMaterials.model_validate(
+        record.materials_snapshot,
+    )
+
+    try:
+        suggestion = paper_draft_agent.expand_paper_draft_section(
+            draft=draft,
+            materials=materials,
+            request=request,
+        )
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        ) from error
+
+    return PaperDraftExpandResponse(
+        draft_id=record.id,
+        section=request.section,
+        paragraphs=suggestion.paragraphs,
+    )
