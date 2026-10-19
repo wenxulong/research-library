@@ -2,6 +2,8 @@
 
 Vue 3 + Vite，使用JavaScript。七个页面：论文资料库、研究任务、作业与报告、研究方案、实验结果、论文写作、服务状态。完整操作见[七阶段使用指南](../USER_GUIDE.md)。
 
+Windows用户请先阅读[WSL2安装指南](../WINDOWS.md)，以下npm命令在Ubuntu环境执行；不要将Windows的node_modules复制到WSL。
+
 ## 开发与构建
 
 从项目根目录执行：

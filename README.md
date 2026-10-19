@@ -4,7 +4,7 @@
 
 项目重点是让研究结论能够追溯到论文原文：回答和报告携带来源，审校检查陈述是否得到证据支持，证据不足时尝试补充资料并复审。模型输出仍需要研究者核对，不能替代实际阅读与实验验证。
 
-当前版本主要面向 Mac 本机个人使用；Linux 提供部署模板，尚未完成实机验收。
+当前版本已在 Mac 本机个人环境验收。Windows 推荐通过 WSL2 + Ubuntu 运行，见 [Windows 使用指南](WINDOWS.md)；Windows/WSL 与 Linux 部署模板尚未完成实机验收。
 
 ## 功能
 
@@ -81,7 +81,17 @@ PDF 文件存放在磁盘，文件元数据和提取后的资料存入 MySQL。�
 - 已安装并运行的 **Ollama**，以及配置中的向量模型。
 - **DeepSeek API 密钥**：模型生成类功能需要；论文管理、准备和本地检索不需要该密钥。
 
-安装工具参考：[Python](https://www.python.org/downloads/)、[uv](https://docs.astral.sh/uv/getting-started/installation/)、[Node.js](https://nodejs.org/)、[MySQL](https://dev.mysql.com/downloads/)、[Redis](https://redis.io/docs/latest/operate/oss_and_stack/install/install-redis/)、[Ollama](https://ollama.com/)。下面的命令以 macOS/Linux 终端为例，Windows 启动流程尚未验收。
+安装工具参考：[Python](https://www.python.org/downloads/)、[uv](https://docs.astral.sh/uv/getting-started/installation/)、[Node.js](https://nodejs.org/)、[MySQL](https://dev.mysql.com/downloads/)、[Redis](https://redis.io/docs/latest/operate/oss_and_stack/install/install-redis/)、[Ollama](https://ollama.com/)。下面的命令以 macOS/Linux 终端为例。Windows 用户请从 [WSL2 安装与启动步骤](WINDOWS.md) 开始，避免混用 PowerShell 与 Linux 命令。
+
+## 系统选择
+
+| 环境 | 使用方式与验证状态 |
+| --- | --- |
+| macOS | 当前已完成本机验收 |
+| Windows | 推荐WSL2 + Ubuntu，提供安装指南，尚未实机验收 |
+| Linux服务器 | 提供部署模板，尚未实机验收 |
+
+不承诺原生Windows Celery Worker的完整兼容性。连接已部署的服务时，Windows用户只需浏览器，无需安装整套开发环境。
 
 ## 快速开始
 
@@ -334,6 +344,7 @@ research-library/
 
 ## 进一步阅读
 
+- [Windows / WSL2 安装、启动与常见问题](WINDOWS.md)
 - [七阶段使用指南、实验CSV与章节扩写](USER_GUIDE.md)
 - [部署、迁移、日志与故障恢复](DEPLOYMENT.md)
 - [前端开发、构建和页面说明](frontend/README.md)
