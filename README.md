@@ -4,7 +4,7 @@
 
 项目重点是让研究结论能够追溯到论文原文：回答和报告携带来源，审校检查陈述是否得到证据支持，证据不足时尝试补充资料并复审。模型输出仍需要研究者核对，不能替代实际阅读与实验验证。
 
-当前版本已在 Mac 本机个人环境验收。Windows 推荐通过 WSL2 + Ubuntu 运行，见 [Windows 使用指南](WINDOWS.md)；Windows/WSL 与 Linux 部署模板尚未完成实机验收。
+当前版本已在 Mac 本机个人环境验收。Windows 推荐通过 WSL2 + Ubuntu 运行，见 [Windows 使用指南](docs/WINDOWS.md)；Windows/WSL 与 Linux 部署模板尚未完成实机验收。
 
 ## 功能
 
@@ -22,6 +22,7 @@
 | 实验结果 | 导入实际运行得到的CSV，按方法、数据集和场景统计多个指标，生成图表与分析 |
 | 研究报告 | 将方案、统计、图表与分析打包为带证据的研究报告ZIP |
 | 论文写作 | 生成并保存中文Markdown初稿，读取、章节扩写、确认保存及ZIP下载 |
+| 写作Skill | 一句话表达扩写要求，加载Skill说明、识别章节并调用扩写工具；要求不明确时先询问 |
 | 问答缓存 | 在资料范围内尝试完全匹配和带实体、意图等条件校验的语义复用 |
 | 原文追溯 | 根据资料引用查看对应文本块和所在页正文 |
 | 运行维护 | 统一配置、Alembic 数据库迁移、健康检查、日志与人工中断恢复 |
@@ -50,7 +51,7 @@ flowchart TD
     P --> Q[章节扩写建议，人工确认后保存和下载]
 ```
 
-第六阶段报告导出与第七阶段写作复用实验材料；写作不要求先点击导出研究报告。详细步骤见[七阶段使用指南](USER_GUIDE.md)。
+第六阶段报告导出与第七阶段写作复用实验材料；写作不要求先点击导出研究报告。详细步骤见[七阶段使用指南](docs/USER_GUIDE.md)。
 
 问答是一条独立使用分支，不必先问答才能生成分析。后台对比报告会执行自己的审校流程，不要求先手动将分析审校到全部通过。
 
@@ -70,7 +71,7 @@ flowchart TD
 
 PDF 文件存放在磁盘，文件元数据和提取后的资料存入 MySQL。向量目前也保存在 MySQL 中，检索时由 Python 计算相似度并排序；项目未使用独立向量数据库。Redis同时用于队列和问答缓存；正式报告与初稿保存在MySQL，不以Redis作为持久化结果库。语义缓存使用Redis的`VADD`/`VSIM`命令，所连接服务须支持这些命令；不支持时跳过语义缓存，继续原有RAG流程。
 
-分析、对比、审校和修订 Agent 由 Python 函数按预定流程协调执行。目前没有实现自由规划的通用 Agent，也没有接入 Skill 自动选择系统。
+分析、对比、审校和修订 Agent 由 Python 函数按预定流程协调执行。提供单个章节扩写Skill：加载项目内SKILL.md，模型识别章节与要求，再调用已有扩写工具；没有多Skill自动选择或自由规划的通用Agent。
 
 ## 环境要求
 
@@ -81,7 +82,7 @@ PDF 文件存放在磁盘，文件元数据和提取后的资料存入 MySQL。�
 - 已安装并运行的 **Ollama**，以及配置中的向量模型。
 - **DeepSeek API 密钥**：模型生成类功能需要；论文管理、准备和本地检索不需要该密钥。
 
-安装工具参考：[Python](https://www.python.org/downloads/)、[uv](https://docs.astral.sh/uv/getting-started/installation/)、[Node.js](https://nodejs.org/)、[MySQL](https://dev.mysql.com/downloads/)、[Redis](https://redis.io/docs/latest/operate/oss_and_stack/install/install-redis/)、[Ollama](https://ollama.com/)。下面的命令以 macOS/Linux 终端为例。Windows 用户请从 [WSL2 安装与启动步骤](WINDOWS.md) 开始，避免混用 PowerShell 与 Linux 命令。
+安装工具参考：[Python](https://www.python.org/downloads/)、[uv](https://docs.astral.sh/uv/getting-started/installation/)、[Node.js](https://nodejs.org/)、[MySQL](https://dev.mysql.com/downloads/)、[Redis](https://redis.io/docs/latest/operate/oss_and_stack/install/install-redis/)、[Ollama](https://ollama.com/)。下面的命令以 macOS/Linux 终端为例。Windows 用户请从 [WSL2 安装与启动步骤](docs/WINDOWS.md) 开始，避免混用 PowerShell 与 Linux 命令。
 
 ## 系统选择
 
@@ -170,7 +171,7 @@ DEEPSEEK_API_KEY=YOUR_DEEPSEEK_API_KEY
 
 程序通过 Alembic 管理表结构：新数据库执行迁移；已有数据库先核对结构，再登记或升级版本。无法识别的结构差异会使初始化停止，不会自动删除表。
 
-当前迁移版本为 `0006_paper_drafts`，已包含研究问题集、研究计划、实验导入和论文初稿存储。已有数据的环境升级前，应备份数据库与上传文件、停止 API 和所有 Worker；详细说明见 [DEPLOYMENT.md](DEPLOYMENT.md)。
+当前迁移版本为 `0008_investigation_adoption`，已包含研究问题集、研究计划、实验导入和论文初稿存储。已有数据的环境升级前，应备份数据库与上传文件、停止 API 和所有 Worker；详细说明见 [DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ### 5. 启动 API、Worker 和前端
 
@@ -253,21 +254,21 @@ npm run build
 确认服务中断后，先停止API及本项目**所有Worker**，再在项目根目录运行对应工具：
 
 ```bash
-.venv/bin/python -B recover_paper_preparation_job.py
+.venv/bin/python -B -m scripts.recover_paper_preparation_job
 ```
 
 ```bash
-.venv/bin/python -B recover_report_job.py
+.venv/bin/python -B -m scripts.recover_report_job
 ```
 
-输入的是相应类型的**作业编号**，不是论文或研究任务编号。脚本要求人工核对确认，不自动证明Worker已停止；只结束指定未完成记录，不删除页面、块和向量。随后启动服务并提交新作业。详细步骤见 [DEPLOYMENT.md](DEPLOYMENT.md)。
+输入的是相应类型的**作业编号**，不是论文或研究任务编号。脚本要求人工核对确认，不自动证明Worker已停止；只结束指定未完成记录，不删除页面、块和向量。随后启动服务并提交新作业。详细步骤见 [DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ## 自动化测试
 
 后端：在项目根目录执行，覆盖全部 `test_*.py` 文件。
 
 ```bash
-.venv/bin/python -B -m unittest discover -q
+.venv/bin/python -B -m unittest discover -s tests -t . -q
 ```
 
 前端：在 `frontend/` 目录执行。
@@ -277,7 +278,7 @@ npm test
 npm run build
 ```
 
-最近一次本机验证记录（2026-10-19）：后端578项、前端94项测试通过，前端构建成功。已用独立演示记录完成章节扩写、编辑建议、确认保存、刷新恢复及ZIP一致性的真实模型联调；演示统计为合成数据，不作为科研结果。测试数量会随代码更新变化。
+本机验证记录（2026-10-20）：后端589项、前端102项测试通过，前端构建成功。已用独立演示记录完成章节扩写、Skill含糊请求询问及明确请求执行、编辑建议、确认保存、刷新恢复及ZIP一致性的真实模型联调；演示统计为合成数据，不作为科研结果。测试数量会随代码更新变化。
 
 后端测试使用独立SQLite及服务模拟，不要将测试建表/删表逻辑改为连接正式数据库。测试通过不能替代MySQL并发验收、远程模型联调或报告质量评估。
 
@@ -285,33 +286,32 @@ npm run build
 
 ```text
 research-library/
-├── api.py                         # FastAPI接口与业务协调
-├── config.py                      # 统一配置
-├── database.py / model.py          # 数据库连接和ORM模型
-├── schemas.py                     # 请求、响应和模型输出结构
-├── *_crud.py                      # 数据库操作
-├── paper_pipeline.py              # PDF准备流程
-├── paper_preparation_worker.py     # 论文准备后台任务
-├── semantic_search.py             # 语义检索与排序
-├── rag_service.py                 # 论文问答
-├── paper_analysis_agent.py        # 结构化分析
-├── review_* / revision_agent.py   # 原文审校与修订
-├── comparison_*.py                # 多论文对比与报告流程
-├── evidence_*.py                  # 证据补充与审校
-├── report_worker.py               # 后台报告任务
-├── report_export.py               # Markdown导出
-├── research_question_* / research_plan_service.py # 候选问题、选择与方案
-├── experiment_*                   # CSV导入、统计、图表和实验分析
-├── research_report_export.py      # 研究报告ZIP
-├── paper_draft_*                  # 写作材料、初稿、扩写、保存与导出
-├── cache_context.py / semantic_cache.py # 问答缓存条件和Redis读写
-├── migrations/                    # Alembic版本
-├── frontend/                      # Vue页面、组件、API封装和测试
-├── deploy/systemd/                # Linux服务模板
-├── test_*.py                      # 后端自动化测试
-├── .env.example                   # 后端配置模板
-└── LICENSE                        # AGPL-3.0标准文本
+├── src/research_library/          # 可安装的后端Python包
+│   ├── main.py                    # FastAPI应用入口
+│   ├── api/                       # 论文、任务、报告等接口路由
+│   ├── core/                      # 配置、模型调用和通用能力
+│   ├── db/                        # 数据库连接、ORM模型、迁移入口
+│   ├── schemas/                   # 请求、响应和结构化输出
+│   ├── repositories/              # 数据库读写函数
+│   ├── services/                  # 业务流程协调
+│   ├── agents/                    # 分析、审校、写作和ReAct
+│   ├── tools/                     # Agent可调用工具
+│   ├── retrieval/                 # PDF解析、分块、检索、RAG和缓存
+│   └── workers/                   # Celery配置与后台任务
+├── tests/                         # api、services、agents及共享fixtures
+├── migrations/                    # Alembic历史版本
+├── frontend/                      # Vue 3 + Vite
+├── scripts/                       # 人工恢复和维护脚本
+├── docs/                          # 使用、部署、Windows和架构文档
+├── skills/                        # 项目内部Skill说明
+├── deploy/                        # 部署模板
+├── manage.py                      # init/check/api/worker统一入口
+├── pyproject.toml / uv.lock        # Python包配置与锁定依赖
+├── .env.example                   # 配置模板
+└── LICENSE                        # AGPL-3.0许可证
 ```
+
+首次克隆或更新目录结构后运行 `uv sync --locked`，将 `src` 中的后端安装到虚拟环境。启动命令仍为 `python manage.py api` 和 `python manage.py worker`（先激活虚拟环境）。`.env`、`uploads/`、`logs/` 和 `frontend/dist/` 继续位于项目根目录，不需要搬动现有数据。目录职责和调用关系见[架构说明](docs/ARCHITECTURE.md)。
 
 ## 常见问题
 
@@ -344,9 +344,9 @@ research-library/
 
 ## 进一步阅读
 
-- [Windows / WSL2 安装、启动与常见问题](WINDOWS.md)
-- [七阶段使用指南、实验CSV与章节扩写](USER_GUIDE.md)
-- [部署、迁移、日志与故障恢复](DEPLOYMENT.md)
+- [Windows / WSL2 安装、启动与常见问题](docs/WINDOWS.md)
+- [七阶段使用指南、实验CSV与章节扩写](docs/USER_GUIDE.md)
+- [部署、迁移、日志与故障恢复](docs/DEPLOYMENT.md)
 - [前端开发、构建和页面说明](frontend/README.md)
 - [配置模板](.env.example)
 
@@ -357,3 +357,9 @@ research-library/
 第三方依赖保留各自的许可证。PDF解析使用的 [PyMuPDF](https://github.com/pymupdf/PyMuPDF) 提供AGPL-3.0或商业许可，本项目使用其开源版本。本项目许可证不改变第三方依赖、模型、上传论文及其他外部资料各自的许可与权利。
 
 真实API密钥、数据库密码、上传论文、运行数据和日志不作为项目源码发布，相关文件通过 `.gitignore` 排除。发布前仍需核对其他依赖的许可与声明要求。
+
+### 陈述自主查证与采用
+
+2026-10-23：补齐单条对比陈述的用户触发查证、独立候选存储、历史读取及采用接口。采用会合并证据、补充引用、更新最终审校与报告通过状态；不自动改写事实正文。采用操作锁定报告，拒绝已过期候选，并支持重复请求。前端在研究任务和作业报告两处同步结果，导出读取更新后的正式报告。
+
+本轮后端617项、前端111项测试通过，生产构建成功；数据库迁移至0008_investigation_adoption。查证模型与工具在测试中使用模拟响应，本轮未进行真实DeepSeek查证联调。旧报告没有陈述编号时只显示提示，不自动改写历史数据。

@@ -1,7 +1,7 @@
 """连接项目数据库，或使用测试传入的独立连接运行 Alembic。"""
 from alembic import context
-import model  # 注册模型；不能删除这个导入。
-from database import Base, engine
+import research_library.db.model as model  # 注册模型；不能删除这个导入。
+from research_library.db.database import Base, engine
 
 
 target_metadata = Base.metadata

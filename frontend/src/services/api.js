@@ -73,6 +73,17 @@ export const tasksApi = {
   ),
 }
 export const getJob = (kind, id) => request(`/${kind === 'preparation' ? 'paper-preparation-jobs' : 'report-jobs'}/${id}`)
+export const reportClaimsApi = {
+  adopt: id => request(`/report-claim-investigations/${id}/adopt`, { method: 'POST' }),
+  investigate: (jobId, claimId, instruction) => request(
+    `/report-jobs/${jobId}/claims/${encodeURIComponent(claimId)}/investigations`,
+    { method: 'POST', json: { instruction }, ...modelOptions() }
+  ),
+  history: (jobId, claimId) => request(
+    `/report-jobs/${jobId}/claims/${encodeURIComponent(claimId)}/investigations?limit=10`
+  ),
+  read: id => request(`/report-claim-investigations/${id}`),
+}
 export const researchPlanningApi = {
   tasks: tasksApi.list,
   reports: id => tasksApi.reportHistory(id, 20, 0),
@@ -97,6 +108,7 @@ export const experimentsApi = {
   draft: (id, data) => request(`/experiment-imports/${id}/paper-draft`, { method: 'POST', json: data, ...modelOptions() }),
   readDraft: id => request(`/paper-drafts/${id}`),
   expandDraft: (id, data) => request(`/paper-drafts/${id}/expand`, { method: 'POST', json: data, ...modelOptions() }),
+  runDraftSkill: (id, instruction) => request(`/paper-drafts/${id}/skill`, { method: 'POST', json: { instruction }, ...modelOptions() }),
   updateDraft: (id, content) => request(`/paper-drafts/${id}`, { method: 'PATCH', json: content }),
   exportDraft: id => request(`/paper-drafts/${id}/export`, { responseType: 'blob', timeout: 60000 }),
 }

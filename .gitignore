@@ -49,3 +49,6 @@ dist-ssr/
 *.sqlite-*
 *.sqlite3
 *.sqlite3-*
+
+# Python package build metadata
+*.egg-info/

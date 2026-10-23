@@ -10,7 +10,9 @@ export function useJobs(notify) {
   }, error(record, message) { const item = entries.value.find(x => x.key === jobKey(record.kind, record.jobId)); if (item) item.error = message } })
   function track(kind, ownerId, job) {
     const key = jobKey(kind, job.id)
-    if (!entries.value.some(x => x.key === key)) entries.value.unshift({ key, kind, ownerId, jobId: job.id, job, error: '' })
+    const existing = entries.value.find(x => x.key === key)
+    if (existing) { existing.job = job; existing.error = '' }
+    else entries.value.unshift({ key, kind, ownerId, jobId: job.id, job, error: '' })
     saveTracking(storage, entries.value); watcher.start({ kind, ownerId, jobId: job.id })
   }
   async function resume(kind, id) {

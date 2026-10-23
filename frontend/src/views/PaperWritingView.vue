@@ -3,12 +3,12 @@ import ExperimentScope from '../components/ExperimentScope.vue'
 import PaperDraftPanel from '../components/PaperDraftPanel.vue'
 const props = defineProps({ workspace: { type: Object, required: true } })
 defineEmits(['source', 'experiments'])
-const { imported, importIdInput, draftIdInput, metrics, dataset, scenario, writing, draft, expansion, expansionSuggestion, busy, error, message, loadImport, loadDraft, generateDraft, exportDraft, expandDraft, discardExpansion, acceptExpansion } = props.workspace
+const { imported, importIdInput, draftIdInput, metrics, dataset, scenario, writing, draft, expansion, expansionSuggestion, skillInstruction, skillQuestion, busy, error, message, loadImport, loadDraft, generateDraft, exportDraft, expandDraft, discardExpansion, acceptExpansion, runDraftSkill } = props.workspace
 const sections = [['introduction', '引言'], ['related_work', '相关工作'], ['methods', '方法'], ['experiments', '实验设置与结果'], ['discussion', '讨论与局限'], ['conclusion', '结论']]
 </script>
 <template>
   <header class="page-head"><div><p class="eyebrow">论文初稿 / WRITING</p><h1>让研究材料成为论文初稿</h1><p class="muted">补充实际方法与实验条件，保留引用和待完善内容。</p></div></header>
-  <p v-if="busy" class="notice loading" role="status">{{ busy === 'draft' ? '正在生成并保存初稿，请保持页面打开；生成会产生API用量。' : busy === 'draft-expand' ? '正在生成章节扩写建议，会产生API用量；原稿尚未修改。' : '正在处理…读取、保存和下载已有内容不会调用模型。' }}</p>
+  <p v-if="busy" class="notice loading" role="status">{{ busy === 'draft' ? '正在生成并保存初稿，请保持页面打开；生成会产生API用量。' : busy === 'draft-skill' ? '正在理解扩写要求并执行章节扩写 Skill，会产生API用量；原稿尚未修改。' : busy === 'draft-expand' ? '正在生成章节扩写建议，会产生API用量；原稿尚未修改。' : '正在处理…读取、保存和下载已有内容不会调用模型。' }}</p>
   <p v-if="error" class="notice error" role="alert">{{ error }}</p><p v-if="message" class="notice success" role="status">{{ message }}</p>
   <section class="panel workflow-section"><h2>1. 使用已导入的实验结果</h2><fieldset :disabled="!!busy"><form class="toolbar" @submit.prevent="loadImport()"><label>实验导入编号<input v-model="importIdInput" required type="number" min="1" step="1" /></label><button type="submit">打开实验记录</button><button type="button" @click="$emit('experiments')">前往实验结果页面</button></form></fieldset>
     <fieldset :disabled="!!busy"><form class="toolbar" @submit.prevent="loadDraft()"><label>已保存初稿编号<input v-model="draftIdInput" required type="number" min="1" step="1" /></label><button type="submit">打开已保存初稿</button></form></fieldset>
@@ -27,6 +27,13 @@ const sections = [['introduction', '引言'], ['related_work', '相关工作'], 
     <section v-if="draft?.id" class="panel workflow-section">
       <h2>3. 扩写某一章</h2>
       <p class="hint">模型先生成建议，你确认后才保存。可以先修改建议的文字，再确认替换整章。</p>
+      <form @submit.prevent="runDraftSkill"><fieldset :disabled="!!busy">
+        <label>一句话扩写（Skill）<textarea v-model="skillInstruction" required maxlength="2000" rows="3" placeholder="例如：帮我扩写引言，补充研究背景和动机，保留原文依据。" /></label>
+        <p class="hint">系统识别要扩写的章节；要求不明确时会先询问。执行扩写通常需要两次模型调用，比手动选择章节多一次识别。</p>
+        <button class="primary" type="submit" :disabled="!skillInstruction.trim()">执行写作 Skill</button>
+      </fieldset></form>
+      <p v-if="skillQuestion" class="notice warning" role="status">{{ skillQuestion }} 请在上方补全要求后重新执行。</p>
+      <h3>或手动选择章节</h3>
       <form @submit.prevent="expandDraft"><fieldset :disabled="!!busy">
         <label>选择章节<select v-model="expansion.section"><option v-for="[field, title] in sections" :key="field" :value="field">{{ title }}</option></select></label>
         <label>扩写要求<textarea v-model="expansion.instruction" required maxlength="2000" rows="3" placeholder="例如：补充背景与研究动机，展开为4个段落，保留已有依据，不编造研究贡献。" /></label>

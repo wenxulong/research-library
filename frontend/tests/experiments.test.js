@@ -365,3 +365,93 @@ test('pending expansion blocks duplicate generation and premature confirmation',
   finish(suggestion()); await pending
   assert.ok(state.expansionSuggestion.value)
 })
+
+test('Skill API sends natural language to current draft endpoint', async t => {
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, '/paper-drafts/42/skill')
+    assert.equal(options.method, 'POST')
+    assert.deepEqual(JSON.parse(options.body), { instruction: '扩写引言背景' })
+    return new Response('{"status":"needs_clarification"}')
+  })
+  assert.equal((await experimentsApi.runDraftSkill(42, '扩写引言背景')).status, 'needs_clarification')
+})
+const skillResult = () => ({ skill_name: 'paper-section-expand', status: 'suggested', message: '建议已生成，尚未保存', instruction: '展开方法步骤', suggestion: suggestion() })
+
+test('Skill previews selected chapter without changing draft and confirms via existing save', async () => {
+  const calls = [], original = editableDraft()
+  const { state } = setup({ readDraft: async () => original,
+    runDraftSkill: async (...args) => { calls.push(['skill', ...args]); return skillResult() },
+    updateDraft: async (id, content) => { calls.push(['save', id, content]); return { ...original, content } },
+  })
+  await state.loadDraft(42)
+  state.skillInstruction.value = ' 展开方法步骤 '
+  await state.runDraftSkill()
+  assert.deepEqual(calls, [['skill', 42, '展开方法步骤']])
+  assert.equal(state.expansion.section, 'methods')
+  assert.equal(state.expansion.instruction, '展开方法步骤')
+  assert.deepEqual(state.expansionSuggestion.value, suggestion())
+  assert.equal(state.draft.value.content.methods[0].text, 'methods')
+  state.expansionSuggestion.value.paragraphs[0].text = '人工确认的Skill正文'
+  await state.acceptExpansion()
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1][2].methods[0].text, '人工确认的Skill正文')
+  assert.equal(state.draft.value.content.methods[0].text, '人工确认的Skill正文')
+  assert.equal(state.draft.value.content.introduction[0].text, 'introduction')
+})
+test('ambiguous Skill request asks user without saving or retaining stale suggestion', async () => {
+  const { state } = setup({ runDraftSkill: async () => ({ status: 'needs_clarification', message: '需要扩写哪一章？', suggestion: null }), updateDraft: () => assert.fail('must not save') })
+  await state.loadDraft(42)
+  state.skillInstruction.value = '写长一点'
+  state.expansionSuggestion.value = suggestion()
+  await state.runDraftSkill()
+  assert.equal(state.expansionSuggestion.value, null)
+  assert.match(state.skillQuestion.value, /哪一章/)
+  assert.equal(state.draft.value.id, 42)
+  state.skillInstruction.value = '扩写引言'
+  assert.equal(state.skillQuestion.value, '')
+})
+test('changing Skill instruction or restoring draft discards unsaved suggestions', async () => {
+  const { state } = setup({ runDraftSkill: async () => skillResult() })
+  await state.loadDraft(42)
+  state.skillInstruction.value = '扩写方法'
+  await state.runDraftSkill()
+  state.skillInstruction.value = '扩写讨论'
+  assert.equal(state.expansionSuggestion.value, null)
+  await state.runDraftSkill()
+  await state.loadDraft(42)
+  assert.equal(state.expansionSuggestion.value, null)
+})
+test('failed Skill preserves original and permits retry', async () => {
+  let fail = true
+  const { state } = setup({ runDraftSkill: async () => { if (fail) throw new Error('模型失败'); return skillResult() } })
+  await state.loadDraft(42)
+  state.skillInstruction.value = '扩写方法'
+  await state.runDraftSkill()
+  assert.equal(state.error.value, '模型失败')
+  assert.equal(state.draft.value.id, 42)
+  assert.equal(state.expansionSuggestion.value, null)
+  assert.equal(state.busy.value, '')
+  fail = false
+  await state.runDraftSkill()
+  assert.ok(state.expansionSuggestion.value)
+})
+test('Skill blocks empty inputs and missing draft before calling model', async () => {
+  const { state } = setup({ runDraftSkill: () => assert.fail('must not call model') })
+  await state.runDraftSkill()
+  assert.match(state.error.value, /先生成或打开/)
+  await state.loadDraft(42)
+  state.skillInstruction.value = '  '
+  await state.runDraftSkill()
+  assert.match(state.error.value, /一句话扩写要求/)
+})
+test('pending Skill cannot trigger duplicate or manual generation', async () => {
+  let finish, calls = 0
+  const { state } = setup({ runDraftSkill: () => { calls++; return new Promise(resolve => { finish = resolve }) }, expandDraft: () => assert.fail('must not expand twice') })
+  await state.loadDraft(42)
+  state.skillInstruction.value = '扩写方法'
+  const pending = state.runDraftSkill()
+  await state.runDraftSkill(); await state.expandDraft()
+  assert.equal(calls, 1)
+  finish(skillResult()); await pending
+  assert.equal(state.busy.value, '')
+})

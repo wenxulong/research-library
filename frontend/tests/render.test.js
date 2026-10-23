@@ -10,6 +10,14 @@ after(async()=>{await server?.close()})
 async function render(path,props){const module=await server.ssrLoadModule(path);return renderToString(createSSRApp(module.default,props))}
 const source={source_number:23,paper_id:9,paper_title:'语义缓存',chunk_id:901,page_number:4,score:null}
 const report={report:{method_comparisons:[{text:'对比结论[资料23]',source_numbers:[23]}],experiment_comparisons:[],conclusion_comparisons:[],evidence_notes:[],sources:[source]},review:{items:[{claim:'对比结论',verdict:'insufficient_evidence',reason:'证据不足'}]},correction_rounds:1}
+test('numbered report exposes scoped investigation while legacy report explains missing ids',async()=>{
+ const legacy=await render('/src/components/ReportPanel.vue',{result:report,jobId:19})
+ assert.match(legacy,/旧报告无陈述编号/)
+ const numbered={...report,report:{...report.report,method_comparisons:[{...report.report.method_comparisons[0],claim_id:'claim-a'}]}}
+ const html=await render('/src/components/ReportPanel.vue',{result:numbered,jobId:19})
+ assert.match(html,/继续查证/);assert.match(html,/开始查证/);assert.match(html,/读取已保存记录/)
+ assert.match(html,/不会覆盖原报告/);assert.doesNotMatch(html,/旧报告无陈述编号/)
+})
 test('report completion is not confused with passed review',async()=>{const html=await render('/src/components/ReportPanel.vue',{result:{...report,passed:false}});assert.match(html,/待核验报告/);assert.doesNotMatch(html,/本轮审校通过/);assert.match(html,/作业已完成，但报告仍有未通过审校/)})
 test('verified report has distinct review badge',async()=>{const html=await render('/src/components/ReportPanel.vue',{result:{...report,passed:true}});assert.match(html,/本轮审校通过/)})
 test('sparse evidence number is preserved and never renumbered',async()=>{const html=await render('/src/components/SourcesPanel.vue',{sources:[source]});assert.match(html,/资料 23/);assert.doesNotMatch(html,/资料 1</);assert.match(html,/论文 9/);assert.match(html,/文本块 901/)})
@@ -40,4 +48,51 @@ test('writing expansion exposes confirmation, editable suggestions and escaped e
   assert.match(html, /23、41/)
   assert.match(html, /&lt;script&gt;/)
   assert.doesNotMatch(html, /<script>unsafe/)
+})
+
+test('Skill entry renders clarification safely and retains manual expansion', async () => {
+  const workspace = createExperimentWorkspace({ storage: null })
+  workspace.imported.value = { id: 9, rows: [], plan_snapshot: { research_question: '问题' } }
+  const content = { title: '论文', abstract: '摘要', ...Object.fromEntries(['introduction', 'related_work', 'methods', 'experiments', 'discussion', 'conclusion'].map(field => [field, [{ text: '正文', source_numbers: [] }]])) }
+  workspace.draft.value = { id: 42, import_id: 9, content, evidence: [], missing_information: [] }
+  workspace.skillQuestion.value = '<script>unsafe</script>请选择章节'
+  const html = await render('/src/views/PaperWritingView.vue', { workspace })
+  assert.match(html, /一句话扩写（Skill）/)
+  assert.match(html, /执行写作 Skill/)
+  assert.match(html, /或手动选择章节/)
+  assert.match(html, /&lt;script&gt;/)
+  assert.match(html, /补全要求后重新执行/)
+  assert.doesNotMatch(html, /<script>unsafe/)
+})
+
+test('contradicted review evidence appears beside statement separately from its citations', async () => {
+  const statement = { text: '原陈述[资料23]', claim_id: 'claim-x', source_numbers: [23] }
+  const result = {
+    ...report, passed: false,
+    report: { ...report.report, method_comparisons: [statement] },
+    review: { items: [{ claim_id: 'claim-x', claim: statement.text,
+      verdict: 'contradicted', reason: '低重复率场景存在反例', source_numbers: [23, 41] }] },
+  }
+  const html = await render('/src/components/ReportPanel.vue', { result })
+  assert.match(html, /反对证据／矛盾核查依据（不作为支持引用）：23、41/)
+  assert.match(html, /低重复率场景存在反例/)
+  assert.match(html, /正文引用（是否成立以审校为准）：23/)
+  assert.doesNotMatch(html, /原陈述\[资料23\]\[资料41\]/)
+  assert.match(html, /待核验报告/)
+})
+
+test('partial and insufficient reviews show conditions or gaps rather than support labels', async () => {
+  for (const [verdict, label] of [
+    ['partially_supported', '适用条件与限制的核查依据'],
+    ['insufficient_evidence', '证据缺口的核查资料（尚不能支持结论）'],
+  ]) {
+    const result = {
+      ...report, passed: false,
+      report: { ...report.report, method_comparisons: [{ text: '陈述[资料23]', claim_id: 'x', source_numbers: [23] }] },
+      review: { items: [{ claim_id: 'x', claim: '陈述', verdict, reason: '需要核验条件', source_numbers: [41] }] },
+    }
+    const html = await render('/src/components/ReportPanel.vue', { result })
+    assert.ok(html.includes(`${label}：41`))
+    assert.doesNotMatch(html, /支持判断的复审依据/)
+  }
 })

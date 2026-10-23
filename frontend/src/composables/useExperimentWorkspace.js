@@ -13,6 +13,7 @@ export function createExperimentWorkspace({ api = experimentsApi, storage = glob
   const draftIdInput = ref('')
   const expansion = reactive({ section: 'introduction', instruction: '' })
   const expansionSuggestion = ref(null)
+  const skillInstruction = ref(''), skillQuestion = ref('')
   const writing = reactive({ implementation_details: '', actual_experiment_setup: '' })
   const busy = ref(''), error = ref(''), message = ref('')
   const columns = computed(() => Object.keys(imported.value?.rows?.[0] || {}))
@@ -25,7 +26,9 @@ export function createExperimentWorkspace({ api = experimentsApi, storage = glob
   watch([metrics, dataset, scenario], invalidateResults, { deep: true, flush: 'sync' })
   watch(writing, () => { draft.value = null }, { flush: 'sync' })
   // 建议只属于当前初稿和本次要求，切换后必须重新生成。
-  watch([draft, () => expansion.section, () => expansion.instruction], () => { expansionSuggestion.value = null }, { flush: 'sync' })
+  watch([draft, () => expansion.section, () => expansion.instruction, skillInstruction], () => {
+    expansionSuggestion.value = null; skillQuestion.value = ''
+  }, { flush: 'sync' })
   async function run(action, work) {
     if (busy.value) return
     busy.value = action; error.value = ''; message.value = ''
@@ -175,6 +178,24 @@ export function createExperimentWorkspace({ api = experimentsApi, storage = glob
     expansionSuggestion.value = null
     message.value = '已放弃扩写建议，已保存的原稿保持不变。'
   }
+  async function runDraftSkill() {
+    await run('draft-skill', async () => {
+      if (!draft.value?.id) throw new Error('请先生成或打开已保存的论文初稿。')
+      const instruction = skillInstruction.value.trim()
+      if (!instruction) throw new Error('请填写一句话扩写要求。')
+      expansionSuggestion.value = null; skillQuestion.value = ''
+      const result = await api.runDraftSkill(draft.value.id, instruction)
+      if (result.status === 'needs_clarification') {
+        skillQuestion.value = result.message
+        return
+      }
+      expansion.section = result.suggestion.section
+      expansion.instruction = result.instruction
+      // 先同步识别出的参数，再设置建议，避免上面的watch清除新结果。
+      expansionSuggestion.value = result.suggestion
+      message.value = `${result.skill_name}：${result.message}`
+    })
+  }
   async function acceptExpansion() {
     await run('draft-save', async () => {
       const suggestion = expansionSuggestion.value
@@ -189,7 +210,7 @@ export function createExperimentWorkspace({ api = experimentsApi, storage = glob
     })
   }
   return { planSetId, uploadPlan, file, importIdInput, imported, metrics, dataset, scenario, statistics, analysis, draft,
-    writing, draftIdInput, expansion, expansionSuggestion, busy, error, message, columns, metricOptions, datasets, scenarios, previewRows,
+    writing, draftIdInput, expansion, expansionSuggestion, skillInstruction, skillQuestion, busy, error, message, columns, metricOptions, datasets, scenarios, previewRows,
     loadPlan, loadImport, loadDraft, initialize, chooseFile, upload, changeDataset, loadStatistics, analyze, exportReport, generateDraft, exportDraft,
-    expandDraft, discardExpansion, acceptExpansion }
+    expandDraft, discardExpansion, acceptExpansion, runDraftSkill }
 }
