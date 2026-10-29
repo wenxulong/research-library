@@ -129,7 +129,7 @@ MySQL、Redis、Ollama作为外部前置服务单独部署；模板不会安装�
 
 ## 当前数据库和写作功能
 
-当前迁移头为`0008_investigation_adoption`。从旧版本升级时必须带齐0003～0008迁移源码；不要只复制model.py或手工新建部分表。
+当前迁移头为`0009_agent_memories`，新增共享记忆表。从旧版本升级时必须保留全部迁移源码；不要只复制model.py或手工新建部分表。
 
 论文初稿正文和材料快照保存在MySQL的paper_drafts表，备份时包含该表及experiment_imports、research_question_sets。Redis缓存丢失不影响这些已保存结果。
 
