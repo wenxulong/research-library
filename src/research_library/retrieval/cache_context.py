@@ -1,3 +1,4 @@
+from research_library.core.citation_utils import extract_source_numbers
 import hashlib
 import json
 import re
@@ -236,7 +237,11 @@ def has_valid_sources(
 ) -> bool:
     """检查缓存答案的所有引用是否对应当前任务的资料。"""
 
-    if not entry.sources:
+    if not entry.sources or not entry.answer.strip():
+        return False
+    try:
+        extract_source_numbers(entry.answer, len(entry.sources))
+    except ValueError:
         return False
     for source in entry.sources:
         current_source = source_map.get(source.chunk_id)

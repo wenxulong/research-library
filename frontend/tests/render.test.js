@@ -96,3 +96,29 @@ test('partial and insufficient reviews show conditions or gaps rather than suppo
     assert.doesNotMatch(html, /支持判断的复审依据/)
   }
 })
+
+test('investigation review disagreement remains visible even when statement verdict is supported', async () => {
+  const statement = { text: '陈述[资料23]', claim_id: 'claim-disputed', source_numbers: [23] }
+  const result = {
+    ...report, passed: true,
+    report: { ...report.report, method_comparisons: [statement] },
+    review: { items: [{ claim_id: 'claim-disputed', claim: statement.text, verdict: 'supported',
+      reason: '原文支持', source_numbers: [23], investigation_assessment: 'disagrees',
+      investigation_reason: '<script>unsafe</script>调查的推断不成立' }] },
+  }
+  const html = await render('/src/components/ReportPanel.vue', { result })
+  assert.match(html, /复审与调查意见存在分歧/)
+  assert.match(html, /采用结果不会自动消除分歧/)
+  assert.match(html, /&lt;script&gt;unsafe&lt;\/script&gt;/)
+  assert.doesNotMatch(html, /<script>unsafe/)
+})
+
+test('uncertain investigation is shown and historical reviews do not invent an assessment', async () => {
+  const uncertain = await render('/src/components/InvestigationReviewNote.vue', {
+    review: { investigation_assessment: 'uncertain', investigation_reason: '缺少证明，无法确认' },
+  })
+  assert.match(uncertain, /调查疑问尚未确认/)
+  assert.match(uncertain, /缺少证明，无法确认/)
+  const legacy = await render('/src/components/InvestigationReviewNote.vue', { review: { verdict: 'supported' } })
+  assert.doesNotMatch(legacy, /复审核对了调查意见|存在分歧|尚未确认/)
+})

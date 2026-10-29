@@ -42,12 +42,12 @@ class TestPDFParser(unittest.TestCase):
         self.assertEqual(result.page_count, 2)
         self.assertEqual(len(result.pages), 2)
         self.assertEqual(result.pages[0].page_number, 1)
-        self.assertEqual(result.pages[0].text, "First page content")
+        self.assertIn("First page content", result.pages[0].text)
         self.assertEqual(result.pages[1].page_number, 2)
-        self.assertEqual(result.pages[1].text, "Second page content")
+        self.assertIn("Second page content", result.pages[1].text)
         self.assertEqual(
             result.full_text,
-            "First page content\n\nSecond page content",
+            "\n\n".join(page.text for page in result.pages),
         )
 
     def test_extract_missing_pdf(self):

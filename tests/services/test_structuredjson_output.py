@@ -44,7 +44,7 @@ class TestStructuredJSONOutput(unittest.TestCase):
         sdk.chat.completions.create.return_value = SimpleNamespace(choices=[SimpleNamespace(
             finish_reason="stop", message=SimpleNamespace(content='{"ok": true}'),
         )])
-        with patch('research_library.core.llm_service.OpenAI', return_value=sdk), patch.dict("os.environ", {"DEEPSEEK_API_KEY": "test-only"}):
+        with patch('research_library.core.llm_service.record_model_usage'), patch('research_library.core.llm_service.OpenAI', return_value=sdk), patch.dict("os.environ", {"DEEPSEEK_API_KEY": "test-only"}):
             self.assertEqual(llm_service.generate_text("返回JSON", "问题", json_mode=True), '{"ok": true}')
             options = sdk.chat.completions.create.call_args.kwargs
             self.assertEqual(options["response_format"], {"type": "json_object"})
@@ -55,7 +55,7 @@ class TestStructuredJSONOutput(unittest.TestCase):
     def test_sdk_empty_and_truncated_outputs_are_retryable_errors(self):
         import research_library.core.llm_service as llm_service
         sdk = Mock()
-        with patch('research_library.core.llm_service.OpenAI', return_value=sdk), patch.dict("os.environ", {"DEEPSEEK_API_KEY": "test-only"}):
+        with patch('research_library.core.llm_service.record_model_usage'), patch('research_library.core.llm_service.OpenAI', return_value=sdk), patch.dict("os.environ", {"DEEPSEEK_API_KEY": "test-only"}):
             for reason, content in (("length", '{"truncated":'), ("stop", "")):
                 sdk.chat.completions.create.return_value = SimpleNamespace(choices=[SimpleNamespace(
                     finish_reason=reason, message=SimpleNamespace(content=content),

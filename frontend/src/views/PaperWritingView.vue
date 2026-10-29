@@ -7,7 +7,7 @@ const { imported, importIdInput, draftIdInput, metrics, dataset, scenario, writi
 const sections = [['introduction', '引言'], ['related_work', '相关工作'], ['methods', '方法'], ['experiments', '实验设置与结果'], ['discussion', '讨论与局限'], ['conclusion', '结论']]
 </script>
 <template>
-  <header class="page-head"><div><p class="eyebrow">论文初稿 / WRITING</p><h1>让研究材料成为论文初稿</h1><p class="muted">补充实际方法与实验条件，保留引用和待完善内容。</p></div></header>
+  <header class="page-head"><div><h1>论文写作</h1></div></header>
   <p v-if="busy" class="notice loading" role="status">{{ busy === 'draft' ? '正在生成并保存初稿，请保持页面打开；生成会产生API用量。' : busy === 'draft-skill' ? '正在理解扩写要求并执行章节扩写 Skill，会产生API用量；原稿尚未修改。' : busy === 'draft-expand' ? '正在生成章节扩写建议，会产生API用量；原稿尚未修改。' : '正在处理…读取、保存和下载已有内容不会调用模型。' }}</p>
   <p v-if="error" class="notice error" role="alert">{{ error }}</p><p v-if="message" class="notice success" role="status">{{ message }}</p>
   <section class="panel workflow-section"><h2>1. 使用已导入的实验结果</h2><fieldset :disabled="!!busy"><form class="toolbar" @submit.prevent="loadImport()"><label>实验导入编号<input v-model="importIdInput" required type="number" min="1" step="1" /></label><button type="submit">打开实验记录</button><button type="button" @click="$emit('experiments')">前往实验结果页面</button></form></fieldset>

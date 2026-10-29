@@ -6,6 +6,11 @@ from research_library.core.llm_service import generate_text
 from research_library.agents.paper_analysis_agent import remove_json_code_block
 from research_library.schemas import PaperDraftContent, PaperDraftMaterials, PaperDraftResponse, PaperDraftExpandRequest, PaperDraftSectionContent
 from research_library.core.structured_output import generate_validated_json
+from sqlalchemy.orm import Session
+
+from research_library.memory.manager import MemoryManager
+from research_library.memory.repository import MemoryRepository
+from research_library.memory.schemas import MemoryContext
 
 SECTION_FIELDS = (
     "introduction",
@@ -15,6 +20,67 @@ SECTION_FIELDS = (
     "discussion",
     "conclusion",
 )
+
+WRITING_MEMORY_RULES = (
+    "\n辅助写作记忆只用于参考表达偏好、术语和处理经验。"
+    "只使用与当前论文写作相关的偏好，忽略无关偏好。"
+    "用户本次明确要求优先于历史偏好。"
+    "当前研究材料与统计结果优先于历史记忆。"
+    "历史计划、建议和经历不能直接写成当前研究已完成的工作。"
+    "不得根据记忆补造实际实现、实验设置、数据、数值或理论证明。"
+    "文献陈述仍必须依据提供的论文原文。"
+    "memory_id不是论文资料编号，不得写入source_numbers。"
+    "缺失材料继续标记待补充，不用记忆填补未知事实。"
+)
+
+def load_writing_memory(
+    db: Session,
+    materials: PaperDraftMaterials,
+    instruction: str,
+) -> MemoryContext:
+    """读取表达偏好及与当前写作要求相关的历史经验。"""
+
+    repository = MemoryRepository(
+        db=db,
+        owner_id="local-user",
+    )
+
+    manager = MemoryManager(
+        repository=repository,
+        max_chars=4000,
+    )
+
+    required = [
+        memory
+        for memory in manager.retriever.get_required_memories(
+            task_id=materials.plan.task_id,
+        )
+        if memory.kind == "preference"
+    ]
+
+    manager.build_context(
+        required=required,
+        related=[],
+    )
+
+    query = (
+        f"研究问题：{materials.plan.research_question}\n"
+        f"本次写作要求：{instruction}\n"
+        "需要参考的历史信息：学术表达、术语修正、"
+        "章节组织、引用处理，以及过去的写作修改经验。"
+    )
+
+    related = manager.retriever.search(
+        query=query,
+        task_id=materials.plan.task_id,
+        limit=3,
+        min_score=0.3,
+    )
+
+    return manager.build_context(
+        required=required,
+        related=related,
+    )
 
 def parse_paper_draft(
     text: str,
@@ -76,9 +142,17 @@ def parse_paper_draft(
     )
 
 def generate_paper_draft(
+    db: Session,
     materials: PaperDraftMaterials,
 ) -> PaperDraftResponse:
     """根据统一研究材料生成中文论文初稿。"""
+
+    memory_context = load_writing_memory(
+        db=db,
+        materials=materials,
+        instruction="根据已有研究材料生成中文论文初稿。",
+    )
+    memory_text = memory_context.content or "没有与本次写作相关的历史记忆。"
 
     output_schema = json.dumps(
         PaperDraftContent.model_json_schema(),
@@ -118,9 +192,12 @@ def generate_paper_draft(
         "只返回符合指定结构的完整JSON，正文使用中文。"
     )
 
+    system_prompt += WRITING_MEMORY_RULES
+
     user_prompt = (
         f"论文写作材料：\n"
         f"{materials.model_dump_json()}\n\n"
+        f"辅助写作记忆：\n{memory_text}\n\n"
         f"输出JSON Schema：\n{output_schema}"
     )
 
@@ -168,12 +245,23 @@ def parse_expanded_section(
     return section_content
 
 def expand_paper_draft_section(
+    db: Session,
     draft: PaperDraftResponse,
     materials: PaperDraftMaterials,
     request: PaperDraftExpandRequest,
     skill_instructions: str = "",
 ) -> PaperDraftSectionContent:
     """根据已有正文和研究材料，生成指定章节的扩写建议。"""
+
+    memory_context = load_writing_memory(
+        db=db,
+        materials=materials,
+        instruction=(
+            f"扩写章节：{request.section}\n"
+            f"具体要求：{request.instruction}"
+        ),
+    )
+    memory_payload = json.loads(memory_context.content) if memory_context.content else None
 
     output_schema = json.dumps(
         PaperDraftSectionContent.model_json_schema(),
@@ -198,6 +286,8 @@ def expand_paper_draft_section(
         "只返回符合指定结构的JSON，不返回标题或其他章节。"
     )
 
+    system_prompt += WRITING_MEMORY_RULES
+
     if skill_instructions:
         system_prompt += (
             "\n\n本次使用的Skill说明：\n"
@@ -210,6 +300,7 @@ def expand_paper_draft_section(
             "instruction": request.instruction,
             "current_content": draft.content.model_dump(mode="json"),
             "materials": materials.model_dump(mode="json"),
+            "writing_memory": memory_payload,
             "output_schema": output_schema,
         },
         ensure_ascii=False,

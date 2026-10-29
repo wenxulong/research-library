@@ -14,8 +14,8 @@ class TestPaperIdentityPrompts(unittest.TestCase):
                                         verdict="contradicted", reason="论文归属错误", source_numbers=[23, 3])
 
     def _check_prompt(self, prompt):
-        self.assertIn("[资料23]\n论文编号：9\n论文标题：相同标题\n页码：4\n原文：低切换实验结果", prompt)
-        self.assertIn("[资料3]\n论文编号：10\n论文标题：相同标题\n页码：5\n原文：法律医疗实验结果", prompt)
+        self.assertIn("[资料23]\n论文编号：9\n论文标题：相同标题\n页码：4\n文本块编号：9001\n原文：低切换实验结果", prompt)
+        self.assertIn("[资料3]\n论文编号：10\n论文标题：相同标题\n页码：5\n文本块编号：9002\n原文：法律医疗实验结果", prompt)
         self.assertNotIn("论文编号：23", prompt)
 
     def test_review_prompt_preserves_real_paper_ids(self):

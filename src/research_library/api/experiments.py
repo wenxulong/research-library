@@ -190,6 +190,7 @@ def analyze_experiment_results(
 
     try:
         return experiment_analysis_agent.generate_experiment_analysis(
+            db=db,
             imported=imported,
             request=request,
         )
@@ -232,6 +233,7 @@ def export_research_report(
 
     try:
         analysis = experiment_analysis_agent.generate_experiment_analysis(
+            db=db,
             imported=imported,
             request=request,
         )

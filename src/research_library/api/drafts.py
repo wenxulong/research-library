@@ -45,6 +45,7 @@ def create_paper_draft(
         )
 
         draft = paper_draft_agent.generate_paper_draft(
+            db=db,
             materials=materials,
         )
 
@@ -106,6 +107,7 @@ def export_paper_draft(
         )
 
         draft = paper_draft_agent.generate_paper_draft(
+            db=db,
             materials=materials,
         )
 
@@ -292,10 +294,16 @@ def expand_saved_paper_draft(
 
     try:
         suggestion = paper_draft_agent.expand_paper_draft_section(
+            db=db,
             draft=draft,
             materials=materials,
             request=request,
         )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
     except RuntimeError as error:
         raise HTTPException(
             status_code=502,
@@ -336,11 +344,17 @@ def run_saved_paper_draft_skill(
     )
     try:
         return paper_writing_skill.run_paper_writing_skill(
+            db=db,
             draft_id=record.id,
             draft=draft,
             materials=materials,
             instruction=request.instruction,
         )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
     except RuntimeError as error:
         raise HTTPException(
             status_code=502,

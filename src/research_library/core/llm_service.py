@@ -1,3 +1,6 @@
+from time import perf_counter
+
+from research_library.core.model_usage import record_model_usage, measure_context
 from research_library.core.config import settings, get_deepseek_api_key
 from openai import (
     APIConnectionError,
@@ -41,32 +44,33 @@ def generate_text(
     if json_mode:
         options = {"response_format": {"type": "json_object"}, "max_tokens": settings.deepseek_json_max_tokens}
 
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    context_stats = measure_context(messages)
+    started_at = perf_counter()
     try:
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt,
-                },
-            ],
+            messages=messages,
             stream=False,
             **options,
         )
 
     except APIConnectionError as error:
+        record_model_usage(started_at=started_at, call_type="text", error=error, context_stats=context_stats)
         raise RuntimeError(
             "无法连接DeepSeek API，请检查网络"
         ) from error
 
     except APIStatusError as error:
+        record_model_usage(started_at=started_at, call_type="text", error=error, context_stats=context_stats)
         raise RuntimeError(
             f"DeepSeek API请求失败，状态码：{error.status_code}"
         ) from error
+
+    record_model_usage(response=response, started_at=started_at, call_type="text", context_stats=context_stats)
 
     if not response.choices:
         raise RuntimeError("DeepSeek API没有返回回答")
@@ -84,9 +88,13 @@ def generate_text(
 def generate_tool_message(
     messages: list[dict],
     tools: list[dict],
+    *,
+    tool_choice: str = "auto",
 ) -> ChatCompletionMessage:
     """调用模型，返回正文或工具调用消息。"""
 
+    context_stats = measure_context(messages, tools)
+    started_at = perf_counter()
     try:
         with OpenAI(
             api_key=get_deepseek_api_key(),
@@ -98,7 +106,7 @@ def generate_tool_message(
                 model=DEEPSEEK_MODEL,
                 messages=messages,
                 tools=tools,
-                tool_choice="auto",
+                tool_choice=tool_choice,
                 stream=False,
                 extra_body={
                     "thinking": {"type": "disabled"},
@@ -106,12 +114,16 @@ def generate_tool_message(
             )
 
     except APIConnectionError as error:
+        record_model_usage(started_at=started_at, call_type="tool", error=error, context_stats=context_stats)
         raise RuntimeError("无法连接DeepSeek API，请检查网络") from error
 
     except APIStatusError as error:
+        record_model_usage(started_at=started_at, call_type="tool", error=error, context_stats=context_stats)
         raise RuntimeError(
             f"DeepSeek工具调用失败，状态码：{error.status_code}"
         ) from error
+
+    record_model_usage(response=response, started_at=started_at, call_type="tool", context_stats=context_stats)
 
     if not response.choices:
         raise RuntimeError("DeepSeek没有返回消息")

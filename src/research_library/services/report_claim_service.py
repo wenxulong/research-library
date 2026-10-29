@@ -77,7 +77,9 @@ def build_claim_context(
 
     evidence = []
 
-    for number in statement.source_numbers:
+    # 复审引用可能是反对证据，不能只读取正文引用，也不能追加到正文冒充支持。
+    evidence_numbers = dict.fromkeys([*statement.source_numbers, *review.source_numbers])
+    for number in evidence_numbers:
         source = sources.get(number)
 
         if source is None:

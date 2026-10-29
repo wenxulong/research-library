@@ -130,3 +130,31 @@ class TestReportClaimContext(fixtures.ComparisonDatabaseFixture, unittest.TestCa
         self.assertEqual(statement.text, revised.claim)
         self.assertEqual(checked.review.items[0].claim_id, statement.claim_id)
         self.assertEqual(checked.review.items[0].claim, statement.text)
+
+    def test_review_only_sources_are_loaded_without_changing_statement_citations(self):
+        changed = self.checked.model_dump(mode='json')
+        changed['review']['items'][0].update(
+            verdict='contradicted', source_numbers=[3, 5, 1, 5])
+        with fixtures.TestingSessionLocal() as db:
+            db.get(ReportJob, self.job_id).result = changed
+            db.commit()
+        response = fixtures.client.get(self.url)
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data['source_numbers'], [1, 3])
+        self.assertEqual([e['source_number'] for e in data['evidence']], [1, 3, 5])
+        self.assertEqual(data['evidence'][-1]['text'], self.raw_texts[4])
+        self.assertEqual(data['review']['verdict'], 'contradicted')
+        with fixtures.TestingSessionLocal() as db:
+            self.assertEqual(db.get(ReportJob, self.job_id).result, changed)
+
+    def test_missing_review_only_original_is_reported_instead_of_silently_skipped(self):
+        changed = self.checked.model_dump(mode='json')
+        changed['review']['items'][0]['source_numbers'] = [1, 3, 5]
+        with fixtures.TestingSessionLocal() as db:
+            db.get(ReportJob, self.job_id).result = changed
+            db.delete(db.get(PaperChunk, self.analysis.sources[4].chunk_id))
+            db.commit()
+        response = fixtures.client.get(self.url)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn('资料5', response.json()['detail'])

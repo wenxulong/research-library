@@ -9,6 +9,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    Index,
     JSON
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -690,5 +691,90 @@ class ReportClaimInvestigation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),
+        nullable=False,
+    )
+
+class AgentMemory(Base):
+    """保存用户级或研究任务级的长期记忆。"""
+
+    __tablename__ = "agent_memories"
+
+    __table_args__ = (
+        Index(
+            "ix_agent_memories_owner_task",
+            "owner_id",
+            "research_task_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    owner_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    research_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "research_tasks.id",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+    )
+
+    memory_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    kind: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    origin: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+    )
+
+    source_type: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
+    )
+
+    source_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    embedding: Mapped[list[float] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    embedding_model: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )

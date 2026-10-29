@@ -10,11 +10,11 @@ class TestSemanticSearch(unittest.TestCase):
         paper = SimpleNamespace(id=1, title="测试论文")
 
         first_chunk = SimpleNamespace(
-            page_number=1,
+            id=1, page_number=1,
             text="不相关的内容",
         )
         second_chunk = SimpleNamespace(
-            page_number=2,
+            id=2, page_number=2,
             text="与问题相关的内容",
         )
 

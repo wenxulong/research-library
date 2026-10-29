@@ -35,10 +35,10 @@ onMounted(refresh)
 defineExpose({ refresh })
 </script>
 <template>
-  <header class="page-head"><div><p class="eyebrow">资料准备 / LIBRARY</p><h1>把论文变成研究资料</h1><p class="muted">上传 PDF，后台提取正文、分块并建立检索向量。</p></div><button class="primary" @click="edit()">＋ 添加论文</button></header>
+  <header class="page-head"><div><h1>论文资料库</h1></div><button class="primary" @click="edit()">＋ 添加论文</button></header>
   <div class="toolbar"><label class="search"><span>搜索</span><input v-model="search" placeholder="标题、作者或备注" aria-label="搜索论文" /></label><span class="muted">{{ papers.length }} 篇论文</span><button :disabled="loading" @click="refresh">{{ loading?'读取中…':'刷新' }}</button></div>
   <p v-if="error" class="notice error" role="alert">{{ error }}</p><p v-if="loading && !papers.length" class="empty">正在读取论文…</p>
-  <div v-else-if="filtered.length" class="paper-grid"><article v-for="paper in filtered" :key="paper.id" class="paper-card"><div class="row between"><span class="eyebrow">PAPER / {{ paper.id }}</span><button class="text-button" @click="edit(paper)">编辑</button></div><h2>{{ paper.title }}</h2><p class="muted">{{ paper.author }} · {{ paper.year }}</p><p v-if="paper.notes" class="notes">{{ paper.notes }}</p>
+  <div v-else-if="filtered.length" class="paper-grid"><article v-for="paper in filtered" :key="paper.id" class="paper-card"><div class="row between"><span class="eyebrow">论文 {{ paper.id }}</span><button class="text-button" @click="edit(paper)">编辑</button></div><h2>{{ paper.title }}</h2><p class="muted">{{ paper.author }} · {{ paper.year }}</p><p v-if="paper.notes" class="notes">{{ paper.notes }}</p>
     <p v-if="docErrors[paper.id]" class="notice error">{{ docErrors[paper.id] }}</p>
     <div v-else-if="documents[paper.id]" class="file-box"><strong>PDF 已上传</strong><span>{{ documents[paper.id].original_name }}</span><small>{{ (documents[paper.id].file_size/1024/1024).toFixed(2) }} MB</small></div>
     <div v-else class="file-box empty-file"><span>{{ documents[paper.id]===null ? '尚未上传 PDF' : '正在查询 PDF…' }}</span><label class="upload-label">选择 PDF<input type="file" accept=".pdf,application/pdf" :disabled="blocked(paper) || documents[paper.id]!==null" @change="upload(paper,$event)" /></label></div>

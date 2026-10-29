@@ -328,6 +328,40 @@ class TestExactCache(unittest.TestCase):
         self.embed.assert_not_called()
         self.generate.assert_called_once()
 
+    def test_invalid_generated_citation_is_repaired_before_cache_write(self):
+        self.generate.side_effect = ['错误引用[资料99]', '正确引用[资料1]']
+        result = self.ask()
+        self.assertEqual(result.answer, '正确引用[资料1]')
+        self.assertEqual(self.generate.call_count, 2)
+        self.assertIn('上次回答未通过校验', self.generate.call_args.kwargs['user_prompt'])
+        self.assertEqual(self.only_entry()[1].answer, '正确引用[资料1]')
+        self.redis.set.assert_called_once()
+
+    def test_repeated_invalid_generation_does_not_write_cache(self):
+        for answer in ('错误引用[资料99]', '格式错误[资料1', '错误引用[资料0]'):
+            with self.subTest(answer=answer):
+                self.generate.reset_mock()
+                self.generate.return_value = answer
+                with self.assertRaisesRegex(RuntimeError, '已尝试2次'):
+                    self.ask()
+                self.assertEqual(self.generate.call_count, 2)
+                self.redis.set.assert_not_called()
+                self.assertEqual(self.storage, {})
+
+    def test_existing_cache_with_invalid_answer_citation_is_not_reused(self):
+        self.ask()
+        key, entry = self.only_entry()
+        self.storage[key] = entry.model_copy(update={'answer': '旧缓存错误引用[资料99]'}).model_dump_json()
+        result = self.ask()
+        self.assertNotIn('资料99', result.answer)
+        self.assertEqual(self.generate.call_count, 2)
+        self.assertEqual(self.only_entry()[1].answer, result.answer)
+
+    def test_explicit_insufficient_evidence_answer_does_not_require_fake_citations(self):
+        self.generate.return_value = '提供的资料不足，无法确认。'
+        self.assertEqual(self.ask().answer, '提供的资料不足，无法确认。')
+        self.generate.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,22 +12,30 @@ class ReviewEvidence:
     page_number: int
     text: str
     paper_id: int | None = None
+    duplicate_of_chunk_id: int | None = None
 
 def format_review_evidence(evidence: list[ReviewEvidence]) -> str:
     """审校与修正共用同一证据格式，保留资料编号和真实论文编号。"""
     parts: list[str] = []
+    by_chunk_id = {item.chunk_id: item for item in evidence}
 
     for item in evidence:
         paper_label = (
             f"论文编号：{item.paper_id}\n"
             if item.paper_id is not None else ""
         )
+        primary = by_chunk_id.get(item.duplicate_of_chunk_id)
+        body = (
+            f"正文同[资料{primary.source_number}]（文本块{primary.chunk_id}），完整原文已提供。"
+            if primary is not None else f"原文：{item.text}"
+        )
         parts.append(
             f"[资料{item.source_number}]\n"
             f"{paper_label}"
             f"论文标题：{item.paper_title}\n"
             f"页码：{item.page_number}\n"
-            f"原文：{item.text}"
+            f"文本块编号：{item.chunk_id}\n"
+            + body
         )
 
     return "\n\n".join(parts)
@@ -39,6 +47,8 @@ class ReviewClaim:
     claim: str
     source_numbers: list[int]
     evidence: list[ReviewEvidence]
+    instruction: str = ""
+    investigation_summary: str = ""
 
 def load_review_evidence(
         db: Session,

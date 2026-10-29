@@ -189,6 +189,9 @@ class ReviewItemResponse(BaseModel):
     ]
     reason: str
     source_numbers: list[int]
+    # 仅查证复审填写；旧报告和普通审校保持兼容。
+    investigation_assessment: Literal["agrees", "disagrees", "uncertain"] | None = None
+    investigation_reason: str = ""
 
 
 class ResearchTaskReviewResponse(BaseModel):
@@ -783,6 +786,7 @@ class ReportClaimEvidenceResponse(ComparisonSourceResponse):
     """报告中的资料信息及对应原文。"""
 
     text: str
+    duplicate_of_chunk_id: int | None = None
 
 
 class ReportClaimContextResponse(BaseModel):

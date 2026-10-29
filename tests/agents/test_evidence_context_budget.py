@@ -47,18 +47,20 @@ class TestEvidenceBudgetLoop(InvestigationFixture, unittest.TestCase):
             return replies.pop(0)
         original = self.context.evidence[0].model_dump(mode='json')
         new = {'chunk_id': self.new_chunk, 'text': '唯一新增原文', 'page_number': 3}
-        omitted = {'chunk_id': 999999, 'text': '超过预算未读原文'}
         initial_chars = sum(len(item.text) for item in self.context.evidence)
+        # 初始额度为总预算的一半；此处让全部初始证据可容纳。
+        budget_limit = initial_chars * 2 + len(new['text'])
+        omitted = {'chunk_id': 999999, 'text': 'X' * (budget_limit + 1)}
         with patch.object(evidence_react, 'generate_tool_message', side_effect=generate), \
              patch.object(evidence_react, 'execute_research_tool', return_value=[original, new, omitted]):
             result = evidence_react.run_evidence_react(
-                Mock(), self.context, '查证', max_evidence_chars=initial_chars + len(new['text']))
+                Mock(), self.context, '查证', max_evidence_chars=budget_limit)
         tools = [json.loads(m['content']) for m in snapshots[1] if m['role'] == 'tool']
         self.assertEqual([o['new_evidence_count'] for o in tools], [1, 0])
         self.assertEqual(tools[0]['evidence'][0]['context_status'], 'already_provided')
         self.assertEqual(tools[1]['evidence'][1]['context_status'], 'already_provided')
         self.assertEqual(tools[0]['evidence'][2]['context_status'], 'context_budget_exceeded')
-        self.assertEqual(tools[1]['remaining_evidence_chars'], 0)
+        self.assertEqual(tools[1]['remaining_evidence_chars'], initial_chars)
         final_context = json.dumps(snapshots[1], ensure_ascii=False)
         self.assertEqual(final_context.count(new['text']), 1)
         self.assertNotIn(omitted['text'], final_context)

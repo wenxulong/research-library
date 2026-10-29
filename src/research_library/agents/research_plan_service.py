@@ -8,6 +8,9 @@ from research_library.db.model import ResearchQuestionSet
 from research_library.agents.paper_analysis_agent import remove_json_code_block
 from research_library.schemas import ResearchConditions, ResearchPlanContent, ResearchPlanResponse, ResearchQuestionCandidate
 from research_library.core.structured_output import generate_validated_json
+from research_library.memory.manager import MemoryManager
+from research_library.memory.repository import MemoryRepository
+from research_library.memory.schemas import MemoryContext
 
 def parse_research_plan(
     text: str,
@@ -29,7 +32,7 @@ def generate_research_plan(
     record: ResearchQuestionSet,
     conditions: ResearchConditions,
 ) -> ResearchPlanResponse:
-    """根据已选问题和实际条件，生成并保存最新计划。"""
+    """根据已选问题、实际条件和相关记忆生成并保存计划。"""
 
     if (
         record.selected_candidate_number is None
@@ -43,6 +46,17 @@ def generate_research_plan(
         record.candidates[
             record.selected_candidate_number - 1
         ]
+    )
+
+    memory_context = load_planning_memory(
+        db=db,
+        record=record,
+        conditions=conditions,
+    )
+
+    memory_text = (
+        memory_context.content
+        or "没有可用的历史研究记忆。"
     )
 
     output_schema = json.dumps(
@@ -69,13 +83,21 @@ def generate_research_plan(
         "result_columns使用英文列名，包含method、dataset、scenario、"
         "seed、run_id，以及计划指标需要保存的结果列。"
         "risks列出待确认事项和可能无法支持假设的情况。"
+        "历史记忆只用于辅助规划，不是已验证的研究事实。"
+        "本次填写的实际研究条件优先于历史记忆中的条件。"
+        "历史条件与本次条件冲突时，按本次条件安排，并在risks说明冲突。"
+        "历史事件和经验可能只适用于特定场景，不要直接推广。"
+        "不得把历史计划当作已经完成的实现或实验。"
+        "memory_id是记忆编号，不是论文资料编号，不能作为学术引用。"
+        "没有相关记忆时，仍根据本次问题、候选依据和实际条件生成计划。"
         "只返回符合指定结构的JSON，正文使用中文。"
     )
 
     user_prompt = (
         f"用户最终选定的问题：\n{question}\n\n"
         f"原候选及其依据审校：\n{basis.model_dump_json()}\n\n"
-        f"实际研究条件：\n{conditions.model_dump_json()}\n\n"
+        f"本次实际研究条件：\n{conditions.model_dump_json()}\n\n"
+        f"辅助研究记忆：\n{memory_text}\n\n"
         f"输出必须符合以下JSON Schema：\n{output_schema}"
     )
 
@@ -100,8 +122,58 @@ def generate_research_plan(
 
     try:
         db.commit()
+
     except Exception:
         db.rollback()
         raise
 
     return response
+
+def load_planning_memory(
+    db: Session,
+    record: ResearchQuestionSet,
+    conditions: ResearchConditions,
+) -> MemoryContext:
+    """读取当前研究方案需要的约束和相关历史经验。"""
+
+    repository = MemoryRepository(
+        db=db,
+        owner_id="local-user",
+    )
+
+    manager = MemoryManager(
+        repository=repository,
+        max_chars=4000,
+    )
+
+    required = [
+        memory
+        for memory in manager.retriever.get_required_memories(
+            task_id=record.task_id,
+        )
+        if memory.kind == "constraint"
+    ]
+
+    manager.build_context(
+        required=required,
+        related=[],
+    )
+
+    query = (
+        f"研究问题：{record.selected_question}\n"
+        f"实际研究条件：{conditions.model_dump_json()}\n"
+        "需要参考的经验：方法设计、基线选择、数据准备、"
+        "指标设置、实验安排，以及过去的失败与处理经验。"
+    )
+
+    related = manager.retriever.search(
+        query=query,
+        task_id=record.task_id,
+        limit=3,
+        min_score=0.3,
+    )
+
+    return manager.build_context(
+        required=required,
+        related=related,
+    )

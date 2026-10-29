@@ -1,5 +1,7 @@
 import json
 
+from sqlalchemy.orm import Session
+
 from pydantic import ValidationError
 
 from research_library.core.config import PROJECT_ROOT
@@ -49,6 +51,7 @@ def parse_skill_decision(
     return decision
 
 def run_paper_writing_skill(
+    db: Session,
     draft_id: int,
     draft: PaperDraftResponse,
     materials: PaperDraftMaterials,
@@ -104,6 +107,7 @@ def run_paper_writing_skill(
 
     section_content = (
         paper_draft_agent.expand_paper_draft_section(
+            db=db,
             draft=draft,
             materials=materials,
             request=expand_request,

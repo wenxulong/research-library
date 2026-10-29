@@ -56,7 +56,7 @@ class TestExperimentAnalysisAPI(ResearchPlanningFixture, unittest.TestCase):
         self.assertTrue(all(group["scenario"] == "normal" for item in data["statistics"] for group in item["groups"]))
         self.generate.assert_called_once()
         prompt = self.generate.call_args.kwargs["user_prompt"]
-        supplied = json.loads(prompt.split("程序计算的统计结果：\n")[1].split("\n\n输出JSON Schema：")[0])
+        supplied = json.loads(prompt.split("程序计算的统计结果：\n")[1].split("\n\n辅助历史记忆，仅供确定检查方向：")[0])
         self.assertEqual(supplied, data["statistics"])
         self.assertIn(self.saved_plan["research_question"], prompt)
 

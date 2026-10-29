@@ -127,3 +127,35 @@ class TestClaimAdoption(InvestigationFixture, unittest.TestCase):
 
     def test_insufficient_evidence_is_separate_from_statement(self):
         self.assert_separate_review('insufficient_evidence')
+
+    def test_focus_and_disagreement_survive_generation_adoption_and_next_investigation(self):
+        import json
+        from research_library.agents import review_agent
+        from research_library.services.report_claim_service import get_report_claim_context
+        from research_library.agents.evidence_react import build_evidence_messages
+        raw = self.react_result()
+        raw['summary'] = '调查认为表述过强，具体条件需要核对。'
+        answer = json.dumps(dict(
+            verdict='partially_supported', reason='只在指定条件下成立', source_numbers=[1, 3, 5],
+            investigation_assessment='disagrees', investigation_reason='调查提出的完全否定不成立，但条件仍应补充。'))
+        with fixtures.TestingSessionLocal() as db, \
+             patch.object(service, 'run_evidence_react', return_value=raw), \
+             patch.object(review_agent, 'generate_text', return_value=answer) as generate:
+            saved = self.run_saved(db)
+        prompt = generate.call_args.kwargs['user_prompt']
+        self.assertIn('核对条件', prompt)
+        self.assertIn(raw['summary'], prompt)
+        self.assertEqual(saved.result.review.investigation_assessment, 'disagrees')
+        self.assertEqual(self.adopt(saved.id).status_code, 200)
+        exported = fixtures.client.get(f'/report-jobs/{self.job_id}/export').text
+        self.assertIn('复审与调查意见存在分歧', exported)
+        self.assertIn('调查提出的完全否定不成立', exported)
+        with fixtures.TestingSessionLocal() as db:
+            context = get_report_claim_context(db, self.job_id, self.context.claim_id)
+            self.assertEqual(context.source_numbers, [1, 3])
+            self.assertEqual([e.source_number for e in context.evidence], [1, 3, 5])
+            self.assertEqual(context.review.investigation_assessment, 'disagrees')
+        messages = build_evidence_messages(context, '再次查证')
+        data = json.loads(messages[1]['content'])
+        self.assertEqual(data['source_roles']['statement_citations'], [1, 3])
+        self.assertEqual(data['source_roles']['review_evidence'], [1, 3, 5])

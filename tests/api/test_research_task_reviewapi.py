@@ -132,6 +132,8 @@ class TestResearchTaskReviewAPI(unittest.TestCase):
         expected = self._save_review_fixture()
         # 旧记录没有陈述编号，读取时应补默认空值，不生成随机编号。
         expected["items"][0]["claim_id"] = ""
+        expected["items"][0]["investigation_assessment"] = None
+        expected["items"][0]["investigation_reason"] = ""
         with patch('research_library.agents.review_agent.generate_text') as generate:
             response = client.get(f"/research-tasks/{self.task_id}/review")
         self.assertEqual(response.status_code, 200, response.text)

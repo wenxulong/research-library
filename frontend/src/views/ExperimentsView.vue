@@ -10,7 +10,7 @@ const { planSetId, uploadPlan, file, importIdInput, imported, dataset, scenario,
 onMounted(initialize)
 </script>
 <template>
-  <header class="page-head"><div><p class="eyebrow">实验结果 / EXPERIMENTS</p><h1>让实验结果有据可查</h1><p class="muted">上传真实实验记录，比较指标，再形成分析与报告。</p></div></header>
+  <header class="page-head"><div><h1>实验结果</h1></div></header>
   <p v-if="busy" class="notice loading" role="status">{{ ['analysis', 'report-export', 'draft', 'draft-export'].includes(busy) ? '模型正在处理，请保持页面打开；这会产生API用量。' : '正在处理…' }}</p>
   <p v-if="error" class="notice error" role="alert">{{ error }}</p><p v-if="message" class="notice success" role="status">{{ message }}</p>
   <section class="panel workflow-section"><h2>1. 上传或打开实验结果</h2>

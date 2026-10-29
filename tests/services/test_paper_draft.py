@@ -121,7 +121,8 @@ class TestPaperDraftParsing(DraftFixture, unittest.TestCase):
         bad = json.loads(json.dumps(self.payload))
         bad["introduction"][0]["source_numbers"] = [999]
         self.writer.side_effect = [json.dumps(bad), json.dumps(self.payload)]
-        draft = generate_paper_draft(materials)
+        with fixtures.TestingSessionLocal() as db:
+            draft = generate_paper_draft(db=db, materials=materials)
         self.assertEqual(self.writer.call_count, 2)
         self.assertEqual(draft.missing_information, materials.missing_information)
         self.assertIn(materials.evidence[0].text, self.writer.call_args.kwargs["user_prompt"])

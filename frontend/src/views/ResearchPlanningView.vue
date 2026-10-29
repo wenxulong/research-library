@@ -22,8 +22,8 @@ onMounted(initialize)
 </script>
 
 <template>
-  <header class="page-head"><div><p class="eyebrow">研究问题 / RESEARCH PLANNING</p>
-    <h1>把文献线索变成研究方案</h1><p class="muted">提出问题、确认方向，再根据实际条件安排实验。</p>
+  <header class="page-head"><div>
+    <h1>研究方案</h1>
   </div></header>
 
   <p v-if="busy" class="notice loading" role="status">{{ ['questions', 'plan'].includes(busy) ? '正在调用模型生成，请保持页面打开。' : '正在处理…' }}</p>
@@ -106,7 +106,7 @@ onMounted(initialize)
 .planning-section { margin-bottom: 22px; }
 .planning-section h2 { margin-bottom: 12px; }
 .candidate-card { border: 1px solid var(--line); border-radius: 9px; padding: 18px; margin: 16px 0; }
-.candidate-card.chosen { border-color: var(--accent); background: #f6faf7; }
+.candidate-card.chosen { border-color: var(--accent); background: var(--surface-soft); }
 .candidate-choice { display: flex; align-items: flex-start; gap: 10px; line-height: 1.8; font-size: 15px; margin-bottom: 14px; }
 .candidate-choice input { width: auto; flex-shrink: 0; margin-top: 7px; accent-color: var(--accent); }
 .candidate-card p { margin-bottom: 10px; }

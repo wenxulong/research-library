@@ -44,6 +44,7 @@ def build_paper_draft_materials(
         )
 
     analysis = experiment_analysis_agent.generate_experiment_analysis(
+        db=db,
         imported=imported,
         request=request,
     )

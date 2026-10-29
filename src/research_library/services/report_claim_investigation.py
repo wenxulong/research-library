@@ -1,4 +1,9 @@
+import logging
+from time import perf_counter
 from copy import deepcopy
+from uuid import uuid4
+
+from research_library.core.model_usage import model_usage_scope, record_investigation_saved, record_memory_extraction
 
 from sqlalchemy.orm import Session
 
@@ -9,6 +14,12 @@ from research_library.agents.review_agent import review_claim
 from research_library.services.review_service import ReviewClaim, ReviewEvidence
 from research_library.repositories.report_claim_investigation_crud import save_investigation
 from research_library.schemas import CheckedComparisonReportResponse, ComparisonSourceResponse, ReportClaimEvidenceResponse, ReportClaimInvestigationResponse, SavedReportClaimInvestigationResponse
+from research_library.memory.manager import MemoryManager
+from research_library.memory.repository import MemoryRepository
+from research_library.memory.schemas import MemoryContext
+from research_library.schemas import ReportClaimContextResponse
+
+logger = logging.getLogger(__name__)
 
 def prepare_investigation_evidence(
     db: Session,
@@ -28,6 +39,7 @@ def prepare_investigation_evidence(
 
     evidence = []
     seen_chunk_ids = set()
+    primary_by_content = {}
 
     for item in retrieved:
         chunk_id = item["chunk_id"]
@@ -60,10 +72,16 @@ def prepare_investigation_evidence(
         ):
             raise ValueError(f"文本块{chunk_id}与报告来源不对应")
 
+        content_key = (
+            chunk.document.paper_id,
+            chunk.text.replace("\r\n", "\n").replace("\r", "\n").strip(),
+        )
+        primary_id = primary_by_content.setdefault(content_key, chunk.id)
         evidence.append(
             ReportClaimEvidenceResponse(
                 **source.model_dump(),
                 text=chunk.text,
+                duplicate_of_chunk_id=primary_id if primary_id != chunk.id else None,
             )
         )
 
@@ -75,6 +93,8 @@ def build_investigation_claim(
     field: str,
     text: str,
     evidence: list[ReportClaimEvidenceResponse],
+    instruction: str = "",
+    investigation_summary: str = "",
 ) -> ReviewClaim:
     """把候选证据转换成现有审校函数需要的结构。"""
 
@@ -89,6 +109,7 @@ def build_investigation_claim(
                 page_number=item.page_number,
                 text=item.text,
                 paper_id=item.paper_id,
+                duplicate_of_chunk_id=item.duplicate_of_chunk_id,
             )
         )
 
@@ -100,6 +121,8 @@ def build_investigation_claim(
             for item in evidence
         ],
         evidence=review_evidence,
+        instruction=instruction,
+        investigation_summary=investigation_summary,
     )
 
 def investigation_report_claim(
@@ -124,10 +147,17 @@ def investigation_report_claim(
         job.result,
     )
 
+    memory_context = load_investigation_memory(
+        db=db,
+        context=context,
+        instruction=instruction,
+    )
+
     react_result = run_evidence_react(
         db=db,
         context=context,
         instruction=instruction,
+        memory_context=memory_context,
     )
 
     evidence = prepare_investigation_evidence(
@@ -140,9 +170,16 @@ def investigation_report_claim(
         field=context.field,
         text=context.text,
         evidence=evidence,
+        instruction=instruction,
+        investigation_summary=react_result["summary"],
     )
 
-    review = review_claim(claim)
+    with model_usage_scope(
+        stage="review", evidence_count=len(evidence),
+        evidence_chars=sum(len(item.text) for item in evidence if item.duplicate_of_chunk_id is None),
+        source_record_count=len(evidence),
+    ):
+        review = review_claim(claim)
 
     review = review.model_copy(
         update={"claim_id": context.claim_id},
@@ -188,8 +225,68 @@ def create_saved_investigation(
         raise ValueError("这个作业尚未成功生成报告")
 
     base_report = deepcopy(job.result)
-    result = investigation_report_claim(
-        db=db, job_id=job_id, claim_id=claim_id, instruction=instruction,
+    with model_usage_scope(
+        trace_id=uuid4().hex, task_id=job.task_id,
+        report_job_id=job_id, claim_id=claim_id,
+    ):
+        result = investigation_report_claim(
+            db=db, job_id=job_id, claim_id=claim_id, instruction=instruction,
+        )
+        record = save_investigation(db=db, base_report=base_report, result=result)
+        record_investigation_saved(record.id)
+        saved = SavedReportClaimInvestigationResponse.model_validate(record)
+
+        # 调查已提交；附加记忆提取失败不能把它误报为查证失败。
+        with model_usage_scope(stage="memory_extract", investigation_id=saved.id):
+            started_at = perf_counter()
+            record_memory_extraction("started", started_at=started_at)
+            try:
+                repository = MemoryRepository(db=db, owner_id="local-user")
+                manager = MemoryManager(repository=repository)
+                writes = manager.learn_from_run(investigation=saved)
+            except Exception as error:
+                db.rollback()
+                record_memory_extraction("failed", started_at=started_at, error=error)
+                logger.warning(
+                    "调查%s的记忆提取或保存失败（%s），调查记录已保留",
+                    saved.id, type(error).__name__,
+                )
+            else:
+                record_memory_extraction(
+                    "completed" if writes else "empty",
+                    started_at=started_at,
+                    memory_ids=[item.memory.id for item in writes],
+                    created_count=sum(item.created for item in writes),
+                    reused_count=sum(not item.created for item in writes),
+                )
+    return saved
+
+def load_investigation_memory(
+    db: Session,
+    context: ReportClaimContextResponse,
+    instruction: str,
+) -> MemoryContext:
+    """读取与当前查证相关的共享记忆。"""
+
+    repository = MemoryRepository(
+        db=db,
+        owner_id="local-user",
     )
-    record = save_investigation(db=db, base_report=base_report, result=result)
-    return SavedReportClaimInvestigationResponse.model_validate(record)
+
+    manager = MemoryManager(
+        repository=repository,
+        max_chars=4000,
+    )
+
+    query = (
+        f"研究问题：{context.question}\n"
+        f"待核查陈述：{context.text}\n"
+        f"本次查证要求：{instruction}"
+    )
+
+    return manager.recall(
+        query=query,
+        task_id=context.task_id,
+        limit=5,
+        min_score=0.3,
+    )

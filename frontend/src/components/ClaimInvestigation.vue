@@ -1,5 +1,6 @@
 <script setup>
 import { computed, toRef } from 'vue'
+import InvestigationReviewNote from './InvestigationReviewNote.vue'
 import { createClaimInvestigation } from '../composables/useClaimInvestigation.js'
 import { verdicts, reviewEvidenceLabels } from '../services/labels'
 
@@ -40,11 +41,13 @@ function toggle(event) { if (event.target.open) loadHistory() }
       <p class="prose">{{ result.summary }}</p>
       <p>原审校：{{ verdicts[result.previous_review.verdict] || result.previous_review.verdict }} → 本次复审：{{ verdicts[result.review.verdict] || result.review.verdict }}</p>
       <p class="prose">{{ result.review.reason }}</p>
+      <InvestigationReviewNote :review="result.review" />
       <p><strong>{{ reviewEvidenceLabels[result.review.verdict] }}：</strong>{{ result.review.source_numbers.join('、') || '无' }}</p>
       <p class="hint">上述编号是复审核查的资料，具体关系见复审说明；并非每段资料都支持正文。</p>
       <p class="hint">复审仍可能误判，请核对下面原文。未采用的候选资料编号不属于正式报告。</p>
       <details v-for="source in result.evidence" :key="source.chunk_id">
         <summary>候选资料 {{ source.source_number }} · {{ source.paper_title }} · 第 {{ source.page_number }} 页 {{ result.added_chunk_ids.includes(source.chunk_id) ? '（本次补充）' : '（已有）' }}</summary>
+        <p v-if="source.duplicate_of_chunk_id" class="hint">正文同文本块 {{ source.duplicate_of_chunk_id }}，保留本资料的编号与页码。</p>
         <p class="hint">文本块 {{ source.chunk_id }}</p><p class="prose">{{ source.text }}</p>
       </details>
       <details><summary>工具执行记录（{{ result.steps.length }} 次）</summary>
@@ -53,6 +56,7 @@ function toggle(event) { if (event.target.open) loadHistory() }
           <p v-if="!step.observation.ok" class="notice error">{{ step.observation.error }}</p>
           <p v-else class="hint">新增原文 {{ step.observation.new_evidence_count ?? step.observation.evidence?.length ?? 0 }} 条</p>
           <p v-if="step.observation.evidence?.some(item => item.context_status === 'already_provided')" class="hint">重复文本块仅返回定位信息，原文已在此前提供。</p>
+          <p v-if="step.observation.evidence?.some(item => item.context_status === 'duplicate_content')" class="hint">{{ step.observation.duplicate_content_count ?? step.observation.evidence.filter(item => item.context_status === 'duplicate_content').length }} 条同论文重复正文已合并，引用使用已提供原文的主块编号。</p>
           <p v-if="step.observation.evidence?.some(item => item.context_status === 'context_budget_exceeded')" class="hint">部分原文超出本次预算，未发送给模型，不能作为已读证据。</p>
         </article>
       </details>
@@ -68,7 +72,7 @@ function toggle(event) { if (event.target.open) loadHistory() }
 <style scoped>
 .claim-investigation { margin-top: 12px; border-top: 1px solid var(--line); padding: 12px 0; }
 .claim-investigation summary { color: var(--accent); cursor: pointer; }
-.investigation-result { margin-top: 18px; padding: 14px; background: #f4f7f4; border-radius: 8px; }
+.investigation-result { margin-top: 18px; padding: 14px; background: var(--surface-soft); border-radius: 8px; }
 .investigation-result details { margin: 12px 0; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 </style>

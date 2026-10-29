@@ -7,12 +7,15 @@ import research_library.repositories.task_crud as task_crud
 from research_library.retrieval.embedding_service import EMBEDDING_MODEL, embed_texts
 from research_library.db.model import Paper, PaperChunk
 from research_library.retrieval.vector_utils import cosine_similarity
+from research_library.retrieval.bm25_search import calculate_bm25_scores
 
 
 SEMANTIC_WEIGHT = 0.85
 KEYWORD_WEIGHT = 0.15
 REFERENCE_PENALTY = 0.12
 MAX_CHUNKS_PER_PAGE = 2
+RRF_CONSTANT = 60
+REFERENCE_SCORE_FACTOR = 0.8
 
 
 def tokenize_text(text: str) -> set[str]:
@@ -240,6 +243,26 @@ def search_texts(
     return matches[:top_k]
 
 
+def fuse_recall_results(
+    semantic_recall: list[tuple[PaperChunk, Paper, float]],
+    bm25_recall: list[tuple[PaperChunk, Paper, float]],
+) -> list[tuple[PaperChunk, Paper, float, float]]:
+    """等权RRF融合两路排名；第三项仍保留原始语义相似度。"""
+    matches_by_chunk_id = {}
+    fusion_scores = {}
+    for recalled_matches in (semantic_recall, bm25_recall):
+        for rank, match in enumerate(recalled_matches, start=1):
+            chunk, paper, semantic_score = match
+            matches_by_chunk_id.setdefault(chunk.id, match)
+            contribution = 0.5 / (RRF_CONSTANT + rank)
+            fusion_scores[chunk.id] = fusion_scores.get(chunk.id, 0.0) + contribution
+
+    return [
+        (chunk, paper, semantic_score, fusion_scores[chunk_id])
+        for chunk_id, (chunk, paper, semantic_score) in matches_by_chunk_id.items()
+    ]
+
+
 def search_task_chunks_semantic(
     db: Session,
     task_id: int,
@@ -247,106 +270,58 @@ def search_task_chunks_semantic(
     top_k: int = 3,
     paper_id: int | None = None,
 ) -> list[tuple[PaperChunk, Paper, float]]:
-    """在任务关联的论文中检索，可限定到某一篇论文。"""
-
+    """在同一任务论文范围内双路召回，按融合分数排序，返回原始语义分数。"""
     question = question.strip()
-
     if not question:
         raise ValueError("问题不能为空")
-
     if top_k < 1:
         raise ValueError("top_k 必须大于 0")
 
-    candidates = task_crud.get_task_chunk_embeddings(
-        db,
-        task_id,
-        EMBEDDING_MODEL,
-    )
-
-    # 在召回和排序之前限定论文，避免其他论文占据检索名额。
+    # 两路共享已向量化文本块集合；单篇限定必须在两路评分之前执行。
+    candidates = task_crud.get_task_chunk_embeddings(db, task_id, EMBEDDING_MODEL)
     if paper_id is not None:
         candidates = [
             (chunk, paper, embedding)
             for chunk, paper, embedding in candidates
             if paper.id == paper_id
         ]
-
     if not candidates:
         return []
 
-    reference_pages = find_reference_pages(
-        candidates
+    reference_pages = find_reference_pages(candidates)
+    question_vector = embed_texts([question])[0]
+    all_matches = [
+        (chunk, paper, cosine_similarity(question_vector, embedding.vector))
+        for chunk, paper, embedding in candidates
+    ]
+    candidate_count = max(top_k * 5, 20)
+    semantic_recall = sorted(
+        all_matches, key=lambda item: item[2], reverse=True,
+    )[:candidate_count]
+
+    # BM25对全部限定候选独立评分，不能只处理向量一路已经召回的文本。
+    bm25_scores = calculate_bm25_scores(
+        question=question,
+        texts=[chunk.text for chunk, paper, embedding in candidates],
     )
-
-    question_vector = embed_texts(
-        [question]
-    )[0]
-
-    semantic_matches = []
-
-    for chunk, paper, embedding in candidates:
-        semantic_score = cosine_similarity(
-            question_vector,
-            embedding.vector,
-        )
-
-        semantic_matches.append(
-            (
-                chunk,
-                paper,
-                semantic_score,
-            )
-        )
-
-    semantic_matches.sort(
-        key=lambda item: item[2],
+    bm25_indices = sorted(
+        (index for index, score in enumerate(bm25_scores) if score > 0),
+        key=lambda index: bm25_scores[index],
         reverse=True,
-    )
+    )[:candidate_count]
+    bm25_recall = [all_matches[index] for index in bm25_indices]
 
-    candidate_count = max(
-        top_k * 5,
-        20,
-    )
-
-    recalled_matches = semantic_matches[:candidate_count]
-
+    fused_matches = fuse_recall_results(semantic_recall, bm25_recall)
     reranked_matches = []
+    for chunk, paper, semantic_score, fusion_score in fused_matches:
+        page_key = (paper.id, chunk.page_number)
+        if page_key in reference_pages or looks_like_reference_chunk(chunk.text):
+            # RRF分数较小，使用比例降权，不复用旧的固定减分值。
+            fusion_score *= REFERENCE_SCORE_FACTOR
+        reranked_matches.append((chunk, paper, semantic_score, fusion_score))
 
-    for chunk, paper, semantic_score in recalled_matches:
-        page_key = (
-            paper.id,
-            chunk.page_number,
-        )
-
-        is_reference_page = (
-            page_key in reference_pages
-        )
-
-        rerank_score = calculate_rerank_score(
-            question=question,
-            chunk_text=chunk.text,
-            semantic_score=semantic_score,
-            is_reference_page=is_reference_page,
-        )
-
-        reranked_matches.append(
-            (
-                chunk,
-                paper,
-                semantic_score,
-                rerank_score,
-            )
-        )
-
-    reranked_matches.sort(
-        key=lambda item: item[3],
-        reverse=True,
-    )
-
-    return select_diverse_matches(
-        reranked_matches,
-        top_k,
-    )
+    reranked_matches.sort(key=lambda item: item[3], reverse=True)
+    return select_diverse_matches(reranked_matches, top_k)
 
 
 if __name__ == "__main__":

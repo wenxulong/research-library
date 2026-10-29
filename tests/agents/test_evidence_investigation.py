@@ -19,6 +19,14 @@ from research_library.schemas import CheckedComparisonReportResponse, SavedRepor
 class InvestigationFixture(fixtures.ComparisonDatabaseFixture):
     def setUp(self):
         super().setUp()
+        self.enterContext(patch.object(service, 'record_investigation_saved'))
+        self.enterContext(patch.object(service, 'record_memory_extraction'))
+        from research_library.memory.extractor import MemoryExtractor
+        from research_library.memory.schemas import MemoryExtractionResponse
+        self.memory_extract_impl = MemoryExtractor.extract
+        # 所有旧查证测试默认空候选，禁止新增步骤请求真实模型。
+        self.enterContext(patch.object(MemoryExtractor, 'extract',
+                                      return_value=MemoryExtractionResponse(memories=[])))
         from research_library.agents.comparison_agent import parse_comparison_response
         from research_library.schemas import ComparisonSourceResponse, ResearchTaskReviewResponse, ReviewItemResponse
         sources = [ComparisonSourceResponse(source_number=n, **s.model_dump())
@@ -62,7 +70,7 @@ class TestEvidenceInvestigation(InvestigationFixture, unittest.TestCase):
         message = ChatCompletionMessage(role='assistant', content='完成')
         client.chat.completions.create.return_value.choices = [
             Mock(finish_reason='stop', message=message)]
-        with patch('research_library.core.llm_service.OpenAI') as factory, patch('research_library.core.llm_service.get_deepseek_api_key', return_value='test'):
+        with patch('research_library.core.llm_service.record_model_usage'), patch('research_library.core.llm_service.OpenAI') as factory, patch('research_library.core.llm_service.get_deepseek_api_key', return_value='test'):
             factory.return_value.__enter__.return_value = client
             result = llm_service.generate_tool_message(messages=[{'role':'user','content':'测试'}], tools=[])
         self.assertIs(result, message)
@@ -88,7 +96,8 @@ class TestEvidenceInvestigation(InvestigationFixture, unittest.TestCase):
     def test_tool_errors_and_round_limit_are_not_success(self):
         message = ChatCompletionMessage(role='assistant', content=None, tool_calls=[{
             'id':'bad', 'type':'function', 'function':{'name':'unknown','arguments':'not-json'}}])
-        with patch('research_library.agents.evidence_react.generate_tool_message', return_value=message):
+        with patch('research_library.agents.evidence_react.generate_tool_message', side_effect=[
+            message, ChatCompletionMessage(role='assistant', content='工具参数有误，当前证据仍不足')]):
             result = evidence_react.run_evidence_react(Mock(), self.context, '查证', max_rounds=1)
         self.assertEqual(result['status'], 'limit_reached')
         self.assertFalse(result['steps'][0]['observation']['ok'])

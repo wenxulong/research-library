@@ -36,6 +36,18 @@ def render_sources(
 
     return "\n\n".join(parts)
 
+def render_investigation_review(review) -> str:
+    """保留调查与复审的关系，不把分歧静默折叠成通过。"""
+    labels = {
+        "agrees": "复审核对了调查意见",
+        "disagrees": "复审与调查意见存在分歧",
+        "uncertain": "调查疑问尚未确认",
+    }
+    if review.investigation_assessment is None:
+        return ""
+    return f"**{labels[review.investigation_assessment]}：**\n\n{quote_text(review.investigation_reason)}"
+
+
 def build_report_markdown(
     checked_report: CheckedComparisonReportResponse,
     job_id: int,
@@ -88,6 +100,9 @@ def build_report_markdown(
             if review is not None:
                 parts.append(f"**当前审校：** {review.verdict}")
                 parts.append(quote_text(review.reason))
+                investigation_note = render_investigation_review(review)
+                if investigation_note:
+                    parts.append(investigation_note)
                 references = " ".join(f"[资料{n}]" for n in review.source_numbers) or "无"
                 parts.append(f"**{evidence_labels[review.verdict]}：** {references}")
 
@@ -101,6 +116,9 @@ def build_report_markdown(
         parts.append(quote_text(item.claim))
         parts.append(f"**判断：** {item.verdict}")
         parts.append(quote_text(item.reason))
+        investigation_note = render_investigation_review(item)
+        if investigation_note:
+            parts.append(investigation_note)
 
     if checked_report.rejected_revisions:
         parts.append("## 未采用的修订")

@@ -16,7 +16,7 @@ function openHistory(item){filter.value=item.kind;expanded.value=item.kind==='re
 function adopted(item, result){props.jobs.track('report',item.ownerId,{...item.job,result:result.checked_report});props.notify('报告已更新。')}
 async function download(item){downloading.value=item.key;try{await downloadReport(item.jobId);props.notify('报告已开始下载。')}catch(cause){props.notify(cause.message,'error')}finally{downloading.value=''}}
 </script>
-<template><header class="page-head"><div><p class="eyebrow">后台流程 / JOBS</p><h1>进度清晰，结果可追溯</h1><p class="muted">查询论文准备和报告作业。刷新页面后继续跟踪。</p></div></header>
+<template><header class="page-head"><div><h1>作业与报告</h1></div></header>
 <section class="panel"><h3>查询已有作业</h3><form class="toolbar" @submit.prevent="resume"><select v-model="kind" aria-label="作业类型"><option value="report">报告作业</option><option value="preparation">论文准备作业</option></select><input v-model="jobId" required type="number" min="1" step="1" placeholder="作业编号" aria-label="作业编号" /><button class="primary" :disabled="resuming" type="submit">{{resuming?'查询中…':'查询并跟踪'}}</button></form><p class="hint">两类作业的编号各自独立，请先选对类型。也可在下方按论文或研究任务查历史，无需记住编号。</p><p v-if="error" class="notice error">{{error}}</p></section>
 <nav class="tabs" aria-label="服务器历史类型"><button :class="{active:historyKind==='report'}" :aria-pressed="historyKind==='report'" @click="historyKind='report'">报告作业历史</button><button :class="{active:historyKind==='preparation'}" :aria-pressed="historyKind==='preparation'" @click="historyKind='preparation'">论文准备历史</button></nav>
 <JobHistory :key="historyKind" :kind="historyKind" :jobs="jobs" @opened="openHistory" />
